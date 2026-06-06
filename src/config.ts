@@ -10,6 +10,7 @@ const schema = z.object({
   WHATSAPP_VERIFY_TOKEN: z.string().min(1),
   WHATSAPP_ACCESS_TOKEN: z.string().min(1),
   WHATSAPP_PHONE_NUMBER_ID: z.string().min(1),
+  WHATSAPP_WABA_ID: z.string().min(1),
   WHATSAPP_API_VERSION: z.string().default("v21.0"),
 
   OPENAI_API_KEY: z.string().min(1),
@@ -39,6 +40,7 @@ export const config = {
     verifyToken: env.WHATSAPP_VERIFY_TOKEN,
     accessToken: env.WHATSAPP_ACCESS_TOKEN,
     phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
+    wabaId: env.WHATSAPP_WABA_ID,
     apiVersion: env.WHATSAPP_API_VERSION,
   },
   openai: {

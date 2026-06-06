@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { config } from "./config";
 import { dispatchTool, toolSpecs } from "./tools";
+import { getActiveClinic, type Clinic } from "./clinics";
 import { nowInClinicTz } from "./tools/time";
 import {
   appendAssistant,
@@ -13,22 +14,42 @@ const client = new OpenAI({ apiKey: config.openai.apiKey });
 
 const MAX_ITERATIONS = 6;
 
-function systemPrompt(phone: string): string {
-  const now = nowInClinicTz();
-  return [
-    `You are the receptionist for "${config.clinic.name}", a single clinic with one shared appointment calendar. You chat with patients over WhatsApp.`,
-    ``,
-    `Current local time: ${now.toFormat("cccc, LLL d yyyy, h:mm a")} (${config.clinic.tz}).`,
-    `Clinic hours: ${config.clinic.open}-${config.clinic.close}, ${config.clinic.days.join(", ")}.`,
-    `Appointments are ${config.clinic.slotMinutes} minutes long.`,
-    ``,
+function systemPrompt(phone: string, clinic: Clinic | null): string {
+  const common = [
     `The patient's WhatsApp number is ${phone}. You already know it — never ask for it and never pass it to tools.`,
-    `Never ask which doctor or specialty; there is only one shared calendar.`,
+    `You serve several clinics from one WhatsApp number. The patient can switch clinics anytime by asking — when they do, call select_clinic with the new clinic's code.`,
+    ``,
+    `Style: keep replies short and natural for WhatsApp. No markdown, no bullet symbols, no long lists. One or two short sentences per turn is ideal.`,
+  ];
+
+  if (!clinic) {
+    return [
+      `You are a friendly receptionist booking appointments across several clinics, over WhatsApp.`,
+      `The patient has NOT picked a clinic yet, so you cannot book anything until one is selected.`,
+      ``,
+      `On the patient's first message (any greeting like "hi", "hey", "hello"), introduce yourself, say you can help book, reschedule, or cancel appointments, then call list_clinics and present the clinics so they can choose one.`,
+      `When the patient names or picks a clinic, call select_clinic with its code before doing anything else.`,
+      `Do not ask for booking details (name, date, time) until a clinic has been selected.`,
+      ``,
+      ...common,
+    ].join("\n");
+  }
+
+  const now = nowInClinicTz(clinic);
+  return [
+    `You are the receptionist for "${clinic.name}", which has one shared appointment calendar. You chat with patients over WhatsApp.`,
+    ``,
+    `Current local time: ${now.toFormat("cccc, LLL d yyyy, h:mm a")} (${clinic.tz}).`,
+    `Clinic hours: ${clinic.open}-${clinic.close}, ${clinic.days.join(", ")}.`,
+    `Appointments are ${clinic.slotMinutes} minutes long.`,
+    ``,
+    `Never ask which doctor or specialty; there is only one shared calendar at this clinic.`,
     ``,
     `What you need to book: patient name, preferred date, preferred time, and reason for visit. Ask ONLY for what's still missing.`,
     ``,
     `Rules:`,
-    `- On the user's very first message (any greeting like "hi", "hey", "hello", "good morning", etc.), immediately introduce yourself and mention that you are the receptionist for ${config.clinic.name}, and state upfront that you can help book, reschedule, or cancel appointments — do not wait for the user to ask what you do.`,
+    `- On the user's very first message (any greeting like "hi", "hey", "hello", "good morning", etc.), immediately introduce yourself and mention that you are the receptionist for ${clinic.name}, and state upfront that you can help book, reschedule, or cancel appointments — do not wait for the user to ask what you do.`,
+    `- If the patient wants a different clinic, call list_clinics and/or select_clinic; bookings, reschedules and cancellations always apply to the currently selected clinic.`,
     `- Whenever a requested time is unavailable for any reason (outside clinic hours, clinic closed that day, or slot already taken), always call list_available_slots for that date and include the clinic's opening hours plus the available slots in your reply so the patient can pick one directly.`,
     `- Use get_current_datetime whenever the user says "today", "tomorrow", "this evening", etc.`,
     `- Never invent or guess available slots. Always verify with list_available_slots or check_slot_available.`,
@@ -37,15 +58,16 @@ function systemPrompt(phone: string): string {
     `- If a requested slot is taken, offer 2-3 nearby alternatives.`,
     `- For reschedule/cancel, first look up the patient's existing booking with find_appointments.`,
     ``,
-    `Style: keep replies short and natural for WhatsApp. No markdown, no bullet symbols, no long lists. One or two short sentences per turn is ideal.`,
+    ...common,
   ].join("\n");
 }
 
 export async function handleIncoming(phone: string, text: string): Promise<string> {
   appendUser(phone, text);
 
+  const clinic = getActiveClinic(phone);
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt(phone) },
+    { role: "system", content: systemPrompt(phone, clinic) },
     ...loadHistory(phone),
   ];
 
@@ -79,7 +101,7 @@ export async function handleIncoming(phone: string, text: string): Promise<strin
         const result = dispatchTool(
           call.function.name,
           call.function.arguments ?? "{}",
-          { phone },
+          phone,
         );
         const resultJson = JSON.stringify(result);
         appendTool(phone, call.id, call.function.name, resultJson);

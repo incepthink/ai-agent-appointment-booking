@@ -1,5 +1,10 @@
 import type OpenAI from "openai";
-import { config } from "../config";
+import {
+  getActiveClinic,
+  getClinicByCode,
+  listActiveClinics,
+  setActiveClinic,
+} from "../clinics";
 import { nowInClinicTz } from "./time";
 import { checkSlotAvailable, listAvailableSlots } from "./slots";
 import {
@@ -7,16 +12,40 @@ import {
   createAppointment,
   findAppointments,
   rescheduleAppointment,
-  type ToolContext,
 } from "./appointments";
 
 export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "list_clinics",
+      description:
+        "Lists the clinics the patient can book at. Call this when the patient hasn't picked a clinic yet, or asks which clinics are available, or wants to switch.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "select_clinic",
+      description:
+        "Sets the clinic the patient is booking at (also used to switch clinics). Use the clinic's short code from list_clinics. All subsequent booking actions apply to this clinic.",
+      parameters: {
+        type: "object",
+        properties: {
+          code: { type: "string", description: "The clinic's short code, e.g. SUNRISE." },
+        },
+        required: ["code"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_current_datetime",
       description:
-        "Returns the current date and time in the clinic's timezone. Call this whenever the user uses relative time words like 'today', 'tomorrow', 'this evening', 'next week'.",
+        "Returns the current date and time in the active clinic's timezone. Call this whenever the user uses relative time words like 'today', 'tomorrow', 'this evening', 'next week'.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -25,7 +54,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "list_available_slots",
       description:
-        "Lists available 30-minute appointment start times for a given date. Optionally filter by part of day.",
+        "Lists available appointment start times for a given date at the active clinic. Optionally filter by part of day.",
       parameters: {
         type: "object",
         properties: {
@@ -46,7 +75,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "check_slot_available",
       description:
-        "Checks whether a specific start time is available. Returns alternatives if not.",
+        "Checks whether a specific start time is available at the active clinic. Returns alternatives if not.",
       parameters: {
         type: "object",
         properties: {
@@ -65,7 +94,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "create_appointment",
       description:
-        "Creates a booking. Only call AFTER the patient has explicitly confirmed name, time, and reason. Phone is already known — do not ask for it and do not pass it.",
+        "Creates a booking at the active clinic. Only call AFTER the patient has explicitly confirmed name, time, and reason. Phone is already known — do not ask for it and do not pass it.",
       parameters: {
         type: "object",
         properties: {
@@ -82,7 +111,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "find_appointments",
-      description: "Returns upcoming booked appointments for the current patient (by their phone).",
+      description: "Returns upcoming booked appointments for the current patient at the active clinic.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -118,10 +147,14 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ];
 
+const NO_CLINIC = {
+  error: "No clinic selected. Use list_clinics to show the options, then select_clinic before booking.",
+};
+
 export function dispatchTool(
   name: string,
   rawArgs: string,
-  ctx: ToolContext,
+  phone: string,
 ): unknown {
   let args: any = {};
   if (rawArgs) {
@@ -132,24 +165,61 @@ export function dispatchTool(
     }
   }
 
+  // Clinic-selection tools don't require an active clinic.
+  if (name === "list_clinics") {
+    return {
+      clinics: listActiveClinics().map((c) => ({
+        code: c.code,
+        name: c.name,
+        tz: c.tz,
+        hours: `${c.open}-${c.close}`,
+        days: c.days.join(", "),
+      })),
+    };
+  }
+  if (name === "select_clinic") {
+    const clinic = getClinicByCode(String(args.code ?? ""));
+    if (!clinic) {
+      return { ok: false, error: `Unknown clinic code "${args.code}". Call list_clinics for valid codes.` };
+    }
+    setActiveClinic(phone, clinic.id);
+    return {
+      ok: true,
+      clinic: {
+        code: clinic.code,
+        name: clinic.name,
+        tz: clinic.tz,
+        hours: `${clinic.open}-${clinic.close}`,
+        days: clinic.days.join(", "),
+      },
+    };
+  }
+
+  // Everything else operates on the currently-active clinic. Resolve it per call
+  // so a select_clinic earlier in the same turn takes effect immediately.
+  const clinic = getActiveClinic(phone);
+  if (!clinic) return NO_CLINIC;
+  const ctx = { phone, clinic };
+
   switch (name) {
     case "get_current_datetime": {
-      const now = nowInClinicTz();
+      const now = nowInClinicTz(clinic);
       return {
+        clinic: clinic.name,
         now_iso: now.toISO(),
-        tz: config.clinic.tz,
+        tz: clinic.tz,
         today: now.toFormat("yyyy-LL-dd"),
         weekday: now.toFormat("cccc"),
         human: now.toFormat("ccc, LLL d 'at' h:mm a"),
-        clinic_hours: `${config.clinic.open}-${config.clinic.close}`,
-        clinic_days: config.clinic.days.join(", "),
-        slot_minutes: config.clinic.slotMinutes,
+        clinic_hours: `${clinic.open}-${clinic.close}`,
+        clinic_days: clinic.days.join(", "),
+        slot_minutes: clinic.slotMinutes,
       };
     }
     case "list_available_slots":
-      return listAvailableSlots(args);
+      return listAvailableSlots(clinic, args);
     case "check_slot_available":
-      return checkSlotAvailable(args);
+      return checkSlotAvailable(clinic, args);
     case "create_appointment":
       return createAppointment(ctx, args);
     case "find_appointments":

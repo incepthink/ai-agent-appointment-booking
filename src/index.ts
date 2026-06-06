@@ -1,6 +1,7 @@
 import express from "express";
 import { config } from "./config";
 import { handleIncoming } from "./agent";
+import { listActiveClinics } from "./clinics";
 import { extractIncoming, sendText, verifyWebhook } from "./whatsapp";
 
 const app = express();
@@ -78,8 +79,9 @@ app.post("/chat", async (req, res) => {
 });
 
 app.listen(config.port, () => {
+  const clinics = listActiveClinics();
   console.log(
-    `[clinic-agent] ${config.clinic.name} listening on :${config.port} ` +
-      `(${config.clinic.tz}, ${config.clinic.open}-${config.clinic.close}, ${config.clinic.days.join(",")})`,
+    `[clinic-agent] listening on :${config.port} — serving ${clinics.length} clinic(s): ` +
+      clinics.map((c) => `${c.name} [${c.code}] (${c.tz})`).join(", "),
   );
 });

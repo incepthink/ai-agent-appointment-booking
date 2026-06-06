@@ -7,6 +7,7 @@ import {
   appendAssistant,
   appendTool,
   appendUser,
+  getLastMessageAt,
   loadHistory,
 } from "./session";
 
@@ -14,7 +15,11 @@ const client = new OpenAI({ apiKey: config.openai.apiKey });
 
 const MAX_ITERATIONS = 6;
 
-function systemPrompt(phone: string, clinic: Clinic | null): string {
+// How long without any message before we treat the next one as a new conversation
+// (re-welcome the patient and let them re-pick their clinic). Easy to tune.
+const STALE_AFTER_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean): string {
   const common = [
     `The patient's WhatsApp number is ${phone}. You already know it — never ask for it and never pass it to tools.`,
     `You serve several clinics from one WhatsApp number. The patient can switch clinics anytime by asking — when they do, call select_clinic with the new clinic's code.`,
@@ -48,7 +53,9 @@ function systemPrompt(phone: string, clinic: Clinic | null): string {
     `What you need to book: patient name, preferred date, preferred time, and reason for visit. Ask ONLY for what's still missing.`,
     ``,
     `Rules:`,
-    `- On the user's very first message (any greeting like "hi", "hey", "hello", "good morning", etc.), immediately introduce yourself and mention that you are the receptionist for ${clinic.name}, and state upfront that you can help book, reschedule, or cancel appointments — do not wait for the user to ask what you do.`,
+    freshStart
+      ? `- This is the start of a new conversation (the patient hasn't messaged in a while). On their first message (any greeting like "hi", "hey", "hello", etc.), treat it as a fresh start: introduce yourself, say you can help book, reschedule, or cancel appointments, and mention you serve several clinics. Note that they were last booking with ${clinic.name}, then call list_clinics and ask whether they'd like to continue with ${clinic.name} or pick a different one. Do NOT assume ${clinic.name} for a new booking until they confirm or choose.`
+      : `- If the patient sends a greeting (like "hi", "hey", "hello"), briefly reintroduce that you are the receptionist for ${clinic.name} and can help book, reschedule, or cancel appointments — and that they can switch clinics anytime by asking. Keep it to one or two short sentences.`,
     `- If the patient wants a different clinic, call list_clinics and/or select_clinic. NEW bookings always apply to the currently selected clinic. Reschedules and cancellations apply to whichever clinic the chosen appointment belongs to (find_appointments returns appointments across all clinics, each with its clinic name).`,
     `- Always name the clinic when confirming a booking, reschedule, or cancellation, and when listing appointments (e.g. "9:00 AM at Harbor Medical"). When listing appointments from find_appointments, include the clinic_name for each one.`,
     `- Whenever a requested time is unavailable for any reason (outside clinic hours, clinic closed that day, or slot already taken), always call list_available_slots for that date and include the clinic's opening hours plus the available slots in your reply so the patient can pick one directly.`,
@@ -64,15 +71,19 @@ function systemPrompt(phone: string, clinic: Clinic | null): string {
 }
 
 export async function handleIncoming(phone: string, text: string): Promise<string> {
+  // Read last-seen time BEFORE appending the just-arrived message so it doesn't count.
+  const lastSeen = getLastMessageAt(phone);
+  const freshStart = !lastSeen || Date.now() - lastSeen.getTime() > STALE_AFTER_MS;
+
   appendUser(phone, text);
 
   const clinic = getActiveClinic(phone);
-  console.log(`[agent] phone=${phone} active_clinic=${clinic ? `${clinic.name} [${clinic.code}]` : "none"}`);
+  console.log(`[agent] phone=${phone} active_clinic=${clinic ? `${clinic.name} [${clinic.code}]` : "none"} fresh_start=${freshStart}`);
 
   const history = loadHistory(phone);
   console.log(`[agent] history_msgs=${history.length}`);
 
-  const prompt = systemPrompt(phone, clinic);
+  const prompt = systemPrompt(phone, clinic, freshStart);
   console.log(`[agent] system_prompt_head=${prompt.slice(0, 120).replace(/\n/g, " | ")}`);
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [

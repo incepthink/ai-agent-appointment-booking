@@ -45,6 +45,20 @@ export function loadHistory(phone: string): ChatMsg[] {
   return msgs;
 }
 
+export function getLastMessageAt(phone: string): Date | null {
+  const row = db
+    .prepare(
+      `SELECT created_at FROM conversations
+       WHERE phone = ?
+       ORDER BY id DESC
+       LIMIT 1`,
+    )
+    .get(phone) as { created_at: string } | undefined;
+  if (!row) return null;
+  // created_at is stored via SQLite datetime('now') as UTC "YYYY-MM-DD HH:MM:SS".
+  return new Date(row.created_at.replace(" ", "T") + "Z");
+}
+
 export function appendUser(phone: string, content: string): void {
   db.prepare(
     `INSERT INTO conversations (phone, role, content) VALUES (?, 'user', ?)`,

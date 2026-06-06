@@ -111,7 +111,8 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "find_appointments",
-      description: "Returns upcoming booked appointments for the current patient at the active clinic.",
+      description:
+        "Returns the patient's upcoming booked appointments across ALL clinics they've booked at. Each result includes clinic_name and clinic_code so you can tell the patient which clinic each appointment is at.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -120,7 +121,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "reschedule_appointment",
       description:
-        "Moves an existing appointment to a new time. Confirm with the patient before calling.",
+        "Moves an existing appointment to a new time. Works on any of the patient's appointments by appointment_id (from find_appointments), even one at a clinic that isn't currently selected; the new time is validated against that appointment's own clinic. Confirm with the patient before calling.",
       parameters: {
         type: "object",
         properties: {
@@ -136,7 +137,8 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "cancel_appointment",
-      description: "Cancels an appointment. Confirm with the patient before calling.",
+      description:
+        "Cancels an appointment by appointment_id (from find_appointments), at whichever clinic it belongs to. Confirm with the patient before calling.",
       parameters: {
         type: "object",
         properties: { appointment_id: { type: "integer" } },

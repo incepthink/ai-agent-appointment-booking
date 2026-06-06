@@ -66,9 +66,17 @@ export async function handleIncoming(phone: string, text: string): Promise<strin
   appendUser(phone, text);
 
   const clinic = getActiveClinic(phone);
+  console.log(`[agent] phone=${phone} active_clinic=${clinic ? `${clinic.name} [${clinic.code}]` : "none"}`);
+
+  const history = loadHistory(phone);
+  console.log(`[agent] history_msgs=${history.length}`);
+
+  const prompt = systemPrompt(phone, clinic);
+  console.log(`[agent] system_prompt_head=${prompt.slice(0, 120).replace(/\n/g, " | ")}`);
+
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt(phone, clinic) },
-    ...loadHistory(phone),
+    { role: "system", content: prompt },
+    ...history,
   ];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {

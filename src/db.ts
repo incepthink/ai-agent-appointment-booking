@@ -90,6 +90,27 @@ db.exec(`
     ON appointments(clinic_id, start_utc) WHERE status = 'booked';
 `);
 
+// --- Migration: dashboard auth + profile columns on clinics ---
+// The owner/admin logs into the dashboard with email + password; profile fields
+// flesh out the clinic record the WhatsApp agent already reads. Added here
+// (nullable) so pre-existing / seeded clinics keep loading.
+const clinicCols = db.prepare(`PRAGMA table_info(clinics)`).all() as { name: string }[];
+const addClinicCol = (name: string, ddl: string) => {
+  if (!clinicCols.some((c) => c.name === name)) {
+    db.exec(`ALTER TABLE clinics ADD COLUMN ${ddl}`);
+  }
+};
+addClinicCol("email", "email TEXT");
+addClinicCol("password_hash", "password_hash TEXT");
+addClinicCol("address", "address TEXT");
+addClinicCol("contact_phone", "contact_phone TEXT");
+addClinicCol("description", "description TEXT");
+// Unique email for login lookups (partial: ignores seeded clinics with NULL email).
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_clinic_email
+    ON clinics(email) WHERE email IS NOT NULL;
+`);
+
 export type AppointmentRow = {
   id: number;
   patient_name: string;
@@ -113,6 +134,11 @@ export type ClinicRow = {
   slot_minutes: number;
   active: number;
   created_at: string;
+  email: string | null;
+  password_hash: string | null;
+  address: string | null;
+  contact_phone: string | null;
+  description: string | null;
 };
 
 export type SessionRow = {

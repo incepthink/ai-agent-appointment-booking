@@ -1,0 +1,253 @@
+import { Router } from "express";
+import { z } from "zod";
+import {
+  hashPassword,
+  verifyPassword,
+  signToken,
+  verifyToken,
+  requireAuth,
+  requireAdmin,
+  generatePassword,
+} from "./auth";
+import { subscribeAppointments } from "./events";
+import {
+  DAYS,
+  type Day,
+  createClinicAccount,
+  getClinicByEmail,
+  getClinicProfile,
+  updateClinic,
+  setClinicPassword,
+} from "./clinics";
+import { listAvailableSlots } from "./tools/slots";
+import { getClinic } from "./clinics";
+import {
+  listClinicAppointments,
+  adminCreateAppointment,
+  adminRescheduleAppointment,
+  adminCancelAppointment,
+} from "./admin-appointments";
+
+export const apiRouter = Router();
+
+const hhmm = z.string().regex(/^\d{2}:\d{2}$/, "Use HH:MM");
+const daysSchema = z
+  .array(z.enum(DAYS as unknown as [Day, ...Day[]]))
+  .min(1, "Pick at least one open day");
+
+// --- Admin: clinic provisioning (no public signup) ---
+
+// We onboard clinics ourselves: there is no self-signup. This endpoint is gated
+// by the admin key (x-admin-key header). The caller supplies the clinic details
+// + email; we generate a password and return it once so it can be handed over.
+const provisionSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  tz: z.string().min(1),
+  open: hhmm,
+  close: hhmm,
+  days: daysSchema,
+  slotMinutes: z.coerce.number().int().positive().default(30),
+  address: z.string().optional(),
+  contactPhone: z.string().optional(),
+  description: z.string().optional(),
+});
+
+apiRouter.post("/admin/clinics", requireAdmin, async (req, res) => {
+  const parsed = provisionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input." });
+  }
+  const data = parsed.data;
+  if (getClinicByEmail(data.email)) {
+    return res.status(409).json({ error: "A clinic with this email already exists." });
+  }
+  const password = generatePassword();
+  const passwordHash = await hashPassword(password);
+  const clinic = createClinicAccount({
+    name: data.name,
+    email: data.email,
+    passwordHash,
+    tz: data.tz,
+    open: data.open,
+    close: data.close,
+    days: data.days,
+    slotMinutes: data.slotMinutes,
+    address: data.address ?? null,
+    contactPhone: data.contactPhone ?? null,
+    description: data.description ?? null,
+  });
+  // Return the plaintext password ONCE — it is not stored or recoverable later.
+  res.status(201).json({ clinic, email: clinic.email, password });
+});
+
+// --- Auth ---
+
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+apiRouter.post("/auth/login", async (req, res) => {
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Email and password are required." });
+  }
+  const row = getClinicByEmail(parsed.data.email);
+  if (!row || !row.password_hash) {
+    return res.status(401).json({ error: "Invalid email or password." });
+  }
+  const ok = await verifyPassword(parsed.data.password, row.password_hash);
+  if (!ok) {
+    return res.status(401).json({ error: "Invalid email or password." });
+  }
+  const token = signToken(row.id);
+  res.json({ token, clinic: getClinicProfile(row.id) });
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+});
+
+apiRouter.post("/auth/change-password", requireAuth, async (req, res) => {
+  const parsed = changePasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input." });
+  }
+  const profile = getClinicProfile(req.clinicId!);
+  if (!profile?.email) return res.status(404).json({ error: "Clinic not found." });
+  const row = getClinicByEmail(profile.email);
+  if (!row || !row.password_hash) {
+    return res.status(400).json({ error: "Password change is unavailable for this account." });
+  }
+  const ok = await verifyPassword(parsed.data.currentPassword, row.password_hash);
+  if (!ok) {
+    return res.status(401).json({ error: "Current password is incorrect." });
+  }
+  setClinicPassword(row.id, await hashPassword(parsed.data.newPassword));
+  res.json({ ok: true });
+});
+
+// --- Clinic profile / config (authenticated) ---
+
+apiRouter.get("/clinic", requireAuth, (req, res) => {
+  const clinic = getClinicProfile(req.clinicId!);
+  if (!clinic) return res.status(404).json({ error: "Clinic not found." });
+  res.json({ clinic });
+});
+
+const updateSchema = z.object({
+  name: z.string().min(1).optional(),
+  tz: z.string().min(1).optional(),
+  open: hhmm.optional(),
+  close: hhmm.optional(),
+  days: daysSchema.optional(),
+  slotMinutes: z.coerce.number().int().positive().optional(),
+  address: z.string().nullable().optional(),
+  contactPhone: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+});
+
+apiRouter.put("/clinic", requireAuth, (req, res) => {
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input." });
+  }
+  const clinic = updateClinic(req.clinicId!, parsed.data);
+  if (!clinic) return res.status(404).json({ error: "Clinic not found." });
+  res.json({ clinic });
+});
+
+// --- Appointments (authenticated, clinic-scoped) ---
+
+apiRouter.get("/appointments", requireAuth, (req, res) => {
+  const { from, to, status } = req.query;
+  const appointments = listClinicAppointments(req.clinicId!, {
+    from: typeof from === "string" ? from : undefined,
+    to: typeof to === "string" ? to : undefined,
+    status: status === "booked" || status === "cancelled" ? status : undefined,
+  });
+  res.json({ appointments });
+});
+
+// Server-Sent Events: push a notification whenever this clinic's appointments
+// change (booked from WhatsApp or the dashboard) so the UI refreshes live.
+// EventSource can't send an Authorization header, so the token rides in ?token=.
+apiRouter.get("/appointments/stream", (req, res) => {
+  const payload = verifyToken(String(req.query.token ?? ""));
+  if (!payload) {
+    res.status(401).end();
+    return;
+  }
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  });
+  res.write(": connected\n\n");
+
+  // Comment pings keep the connection alive through proxies/idle timeouts.
+  const ping = setInterval(() => res.write(": ping\n\n"), 25000);
+  const unsubscribe = subscribeAppointments(payload.clinicId, () => {
+    res.write("event: appointments\ndata: {}\n\n");
+  });
+
+  req.on("close", () => {
+    clearInterval(ping);
+    unsubscribe();
+  });
+});
+
+const createSchema = z.object({
+  patient_name: z.string().min(1),
+  phone: z.string().min(1),
+  start_iso: z.string().min(1),
+  reason: z.string().optional(),
+});
+
+apiRouter.post("/appointments", requireAuth, (req, res) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input." });
+  }
+  const result = adminCreateAppointment(req.clinicId!, parsed.data);
+  if (!result.ok) {
+    return res.status(409).json({ error: result.error, alternatives: result.alternatives });
+  }
+  res.status(201).json({ appointment: result.appointment });
+});
+
+const rescheduleSchema = z.object({ new_start_iso: z.string().min(1) });
+
+apiRouter.patch("/appointments/:id/reschedule", requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid appointment id." });
+  const parsed = rescheduleSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "new_start_iso is required." });
+  const result = adminRescheduleAppointment(req.clinicId!, id, parsed.data.new_start_iso);
+  if (!result.ok) {
+    return res.status(409).json({ error: result.error, alternatives: result.alternatives });
+  }
+  res.json({ appointment: result.appointment });
+});
+
+apiRouter.patch("/appointments/:id/cancel", requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid appointment id." });
+  const result = adminCancelAppointment(req.clinicId!, id);
+  if (!result.ok) return res.status(409).json({ error: result.error });
+  res.json({ appointment: result.appointment });
+});
+
+// --- Available slots for the booking UI ---
+
+apiRouter.get("/slots", requireAuth, (req, res) => {
+  const date = req.query.date;
+  if (typeof date !== "string") {
+    return res.status(400).json({ error: "date (YYYY-MM-DD) is required." });
+  }
+  const clinic = getClinic(req.clinicId!);
+  if (!clinic) return res.status(404).json({ error: "Clinic not found." });
+  res.json(listAvailableSlots(clinic, { date }));
+});

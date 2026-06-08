@@ -16,6 +16,10 @@ const schema = z.object({
   OPENAI_API_KEY: z.string().min(1),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
 
+  JWT_SECRET: z.string().min(1).default("dev-insecure-change-me"),
+  ADMIN_API_KEY: z.string().min(1).default("dev-admin-key-change-me"),
+  DASHBOARD_ORIGIN: z.string().default("http://localhost:3001"),
+
   CLINIC_NAME: z.string().default("The Clinic"),
   CLINIC_TZ: z.string().default("Asia/Kolkata"),
   CLINIC_OPEN: z.string().regex(/^\d{2}:\d{2}$/).default("09:00"),
@@ -47,6 +51,9 @@ export const config = {
     apiKey: env.OPENAI_API_KEY,
     model: env.OPENAI_MODEL,
   },
+  jwtSecret: env.JWT_SECRET,
+  adminApiKey: env.ADMIN_API_KEY,
+  dashboardOrigin: env.DASHBOARD_ORIGIN,
   clinic: {
     name: env.CLINIC_NAME,
     tz: env.CLINIC_TZ,

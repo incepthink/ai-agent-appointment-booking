@@ -1,11 +1,17 @@
 import express from "express";
+import cors from "cors";
 import { config } from "./config";
 import { handleIncoming } from "./agent";
 import { listActiveClinics } from "./clinics";
 import { extractIncoming, sendText, verifyWebhook } from "./whatsapp";
+import { apiRouter } from "./api";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
+
+// Dashboard (separate Next.js app) calls the REST API cross-origin.
+app.use(cors({ origin: config.dashboardOrigin }));
+app.use("/api", apiRouter);
 
 // Simple in-process dedupe for WhatsApp at-least-once delivery
 const seenMessageIds = new Set<string>();

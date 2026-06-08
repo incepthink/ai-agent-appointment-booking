@@ -1,5 +1,6 @@
 import { db, type AppointmentRow } from "../db";
 import { getClinic, type Clinic } from "../clinics";
+import { emitAppointmentsChanged } from "../events";
 import { checkSlotAvailable } from "./slots";
 import {
   endOfSlot,
@@ -34,6 +35,7 @@ export function createAppointment(
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(name, ctx.phone, startUtc, endUtc, args.reason ?? null, ctx.clinic.id);
+    emitAppointmentsChanged(ctx.clinic.id);
     return {
       ok: true,
       appointment: {
@@ -123,6 +125,7 @@ export function rescheduleAppointment(
     db.prepare(
       `UPDATE appointments SET start_utc = ?, end_utc = ? WHERE id = ?`,
     ).run(startUtc, endUtc, row.id);
+    emitAppointmentsChanged(clinic.id);
     return {
       ok: true,
       appointment: {
@@ -150,6 +153,7 @@ export function cancelAppointment(
   if (!row) return { ok: false, error: "Appointment not found for your number." };
   if (row.status !== "booked") return { ok: false, error: "Already cancelled." };
   db.prepare(`UPDATE appointments SET status = 'cancelled' WHERE id = ?`).run(row.id);
+  emitAppointmentsChanged(row.clinic_id);
   const clinic = getClinic(row.clinic_id) ?? ctx.clinic;
   return { ok: true, clinic_name: clinic.name, clinic_code: clinic.code };
 }

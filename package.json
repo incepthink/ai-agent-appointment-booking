@@ -8,21 +8,28 @@
     "dev": "tsx watch src/index.ts",
     "register": "tsx src/register.ts",
     "subscribe": "tsx src/subscribe.ts",
+    "provision": "tsx src/provision.ts",
     "build": "tsc -p .",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.3",
     "luxon": "^3.5.0",
     "openai": "^4.67.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.11",
+    "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/luxon": "^3.4.2",
     "@types/node": "^22.7.4",
     "tsx": "^4.19.1",

@@ -3,7 +3,7 @@ import cors from "cors";
 import { config } from "./config";
 import { handleIncoming } from "./agent";
 import { listActiveClinics } from "./clinics";
-import { extractIncoming, sendText, verifyWebhook } from "./whatsapp";
+import { extractIncoming, sendText, sendTypingIndicator, verifyWebhook } from "./whatsapp";
 import { apiRouter } from "./api";
 import { recordMessageMetric } from "./metrics";
 
@@ -58,6 +58,10 @@ app.post("/webhook", async (req, res) => {
       return;
     }
     rememberId(incoming.messageId);
+
+    // Blue ticks + typing bubble while the agent works — not awaited so it
+    // adds nothing to the reply's latency.
+    void sendTypingIndicator(incoming.messageId).catch(() => {});
 
     console.log(
       `[webhook] processing message from ${incoming.from}: "${incoming.text}"`,

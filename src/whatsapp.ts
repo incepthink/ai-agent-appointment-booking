@@ -69,6 +69,33 @@ export async function sendText(to: string, body: string): Promise<void> {
   }
 }
 
+// Marks the incoming message as read (blue ticks) and shows a typing bubble —
+// the patient sees activity within ~300ms instead of silence while the agent
+// thinks. The indicator auto-dismisses when our reply lands (or after 25s).
+// Fire-and-forget: failures are logged, never thrown, never awaited on the
+// reply's critical path.
+export async function sendTypingIndicator(messageId: string): Promise<void> {
+  const url = `https://graph.facebook.com/${config.whatsapp.apiVersion}/${config.whatsapp.phoneNumberId}/messages`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.whatsapp.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: messageId,
+      typing_indicator: { type: "text" },
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    console.error(`[whatsapp] typing indicator FAILED ${res.status}: ${errBody}`);
+  }
+}
+
 export function verifyWebhook(query: Record<string, string | undefined>):
   | { ok: true; challenge: string }
   | { ok: false } {

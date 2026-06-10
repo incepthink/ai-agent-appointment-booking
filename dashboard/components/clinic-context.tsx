@@ -1,11 +1,16 @@
 "use client";
 
 import * as React from "react";
-import type { Clinic } from "@/lib/types";
+import type { Clinic, Doctor } from "@/lib/types";
 
 type ClinicContextValue = {
   clinic: Clinic;
   setClinic: (c: Clinic) => void;
+  // The logged-in doctor (their own profile + hours).
+  doctor: Doctor;
+  setDoctor: (d: Doctor) => void;
+  // All doctors at the clinic — for the appointments filter + booking picker.
+  doctors: Doctor[];
 };
 
 const ClinicContext = React.createContext<ClinicContextValue | null>(null);
@@ -17,12 +22,21 @@ export function useClinic(): ClinicContextValue {
 }
 
 export function ClinicProvider({
-  initial,
+  initialClinic,
+  initialDoctor,
+  doctors,
   children,
 }: {
-  initial: Clinic;
+  initialClinic: Clinic;
+  initialDoctor: Doctor;
+  doctors: Doctor[];
   children: React.ReactNode;
 }) {
-  const [clinic, setClinic] = React.useState<Clinic>(initial);
-  return <ClinicContext.Provider value={{ clinic, setClinic }}>{children}</ClinicContext.Provider>;
+  const [clinic, setClinic] = React.useState<Clinic>(initialClinic);
+  const [doctor, setDoctor] = React.useState<Doctor>(initialDoctor);
+  return (
+    <ClinicContext.Provider value={{ clinic, setClinic, doctor, setDoctor, doctors }}>
+      {children}
+    </ClinicContext.Provider>
+  );
 }

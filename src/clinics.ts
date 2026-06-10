@@ -14,7 +14,7 @@ export type Clinic = {
   slotMinutes: number;
 };
 
-function parseDays(csv: string): Day[] {
+export function parseDays(csv: string): Day[] {
   return csv
     .split(",")
     .map((d) => d.trim())
@@ -65,11 +65,14 @@ export function getActiveClinic(phone: string): Clinic | null {
 }
 
 export function setActiveClinic(phone: string, clinicId: number): void {
+  // Selecting (or switching) a clinic invalidates any previously selected doctor,
+  // since doctors belong to a specific clinic. Reset active_doctor_id to NULL.
   db.prepare(
-    `INSERT INTO sessions (phone, active_clinic_id, updated_at)
-     VALUES (?, ?, datetime('now'))
+    `INSERT INTO sessions (phone, active_clinic_id, active_doctor_id, updated_at)
+     VALUES (?, ?, NULL, datetime('now'))
      ON CONFLICT(phone) DO UPDATE SET
        active_clinic_id = excluded.active_clinic_id,
+       active_doctor_id = NULL,
        updated_at = excluded.updated_at`,
   ).run(phone, clinicId);
 }

@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { Appointment, Slot } from "@/lib/types";
-import { Button, Field, Input, Textarea, Spinner } from "@/components/ui";
+import { Button, Field, Input, Select, Textarea, Spinner } from "@/components/ui";
 import { Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { useClinic } from "@/components/clinic-context";
 import { cn } from "@/lib/cn";
 
 function todayYmd(): string {
@@ -27,12 +28,16 @@ export function BookingModal({
   initialDate?: string;
 }) {
   const { toast } = useToast();
+  const { doctors } = useClinic();
   const isReschedule = Boolean(reschedule);
 
   const [patientName, setPatientName] = useState("");
   const [phone, setPhone] = useState("");
   const [reason, setReason] = useState("");
   const [date, setDate] = useState(todayYmd());
+  // Which doctor this booking is for. On reschedule it's fixed to the
+  // appointment's own doctor (validated server-side against that doctor).
+  const [doctorId, setDoctorId] = useState<number | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [slotsMsg, setSlotsMsg] = useState<string | undefined>();
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -47,28 +52,34 @@ export function BookingModal({
       setReason("");
       setDate(initialDate ?? todayYmd());
       setSelected(null);
+      setDoctorId(reschedule?.doctor_id ?? doctors[0]?.id ?? null);
     }
-  }, [open, initialDate]);
+  }, [open, initialDate, reschedule, doctors]);
 
-  // Load slots whenever the date changes (while open).
+  // Load slots whenever the date or selected doctor changes (while open).
   useEffect(() => {
     if (!open) return;
+    if (doctorId == null) {
+      setSlots([]);
+      setSlotsMsg("Select a doctor to see available times.");
+      return;
+    }
     let cancelled = false;
     setLoadingSlots(true);
     setSelected(null);
     api
-      .getSlots(date)
+      .getSlots(date, doctorId)
       .then((r) => {
         if (cancelled) return;
         setSlots(r.slots);
-        setSlotsMsg(r.open ? r.message : r.message ?? "Clinic is closed that day.");
+        setSlotsMsg(r.open ? r.message : r.message ?? "The doctor is not available that day.");
       })
       .catch(() => !cancelled && setSlotsMsg("Could not load slots."))
       .finally(() => !cancelled && setLoadingSlots(false));
     return () => {
       cancelled = true;
     };
-  }, [date, open]);
+  }, [date, open, doctorId]);
 
   async function submit() {
     if (!selected) {
@@ -82,11 +93,17 @@ export function BookingModal({
         toast("Appointment rescheduled", "success");
         onDone(appointment);
       } else {
+        if (doctorId == null) {
+          toast("Pick a doctor", "error");
+          setSubmitting(false);
+          return;
+        }
         const { appointment } = await api.createAppointment({
           patient_name: patientName,
           phone,
           start_iso: selected,
           reason: reason || undefined,
+          doctor_id: doctorId,
         });
         toast("Appointment booked", "success");
         onDone(appointment);
@@ -101,7 +118,7 @@ export function BookingModal({
 
   const canSubmit = isReschedule
     ? Boolean(selected)
-    : Boolean(patientName.trim() && phone.trim() && selected);
+    : Boolean(patientName.trim() && phone.trim() && selected && doctorId != null);
 
   return (
     <Modal
@@ -128,7 +145,24 @@ export function BookingModal({
             <Field label="Reason" hint="Optional">
               <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Checkup, follow-up…" />
             </Field>
+            <Field label="Doctor">
+              <Select
+                value={doctorId == null ? "" : String(doctorId)}
+                onChange={(e) => setDoctorId(e.target.value ? Number(e.target.value) : null)}
+              >
+                {doctors.length === 0 && <option value="">No doctors available</option>}
+                {doctors.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name} — {d.specialty}</option>
+                ))}
+              </Select>
+            </Field>
           </>
+        )}
+
+        {isReschedule && reschedule?.doctor_name && (
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">
+            Doctor: <span className="font-medium text-slate-700">{reschedule.doctor_name}</span>
+          </p>
         )}
 
         <Field label="Date">

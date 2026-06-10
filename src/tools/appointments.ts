@@ -1,5 +1,6 @@
 import { db, type AppointmentRow } from "../db";
 import { getClinic, type Clinic } from "../clinics";
+import { getDoctor, type Doctor } from "../doctors";
 import { emitAppointmentsChanged } from "../events";
 import { checkSlotAvailable } from "./slots";
 import {
@@ -12,44 +13,57 @@ import {
 
 export type ToolContext = { phone: string; clinic: Clinic };
 
+type BookedAppointment = {
+  id: number;
+  start_iso: string;
+  label: string;
+  clinic_name: string;
+  clinic_code: string;
+  doctor_name: string;
+  doctor_code: string;
+};
+
 export function createAppointment(
   ctx: ToolContext,
+  doctor: Doctor,
   args: { patient_name: string; start_iso: string; reason?: string },
-): { ok: boolean; appointment?: { id: number; start_iso: string; label: string; clinic_name: string; clinic_code: string }; error?: string; alternatives?: { start_iso: string; label: string }[] } {
+): { ok: boolean; appointment?: BookedAppointment; error?: string; alternatives?: { start_iso: string; label: string }[] } {
   const name = args.patient_name?.trim();
   if (!name) return { ok: false, error: "patient_name is required." };
 
-  const check = checkSlotAvailable(ctx.clinic, { start_iso: args.start_iso });
+  const check = checkSlotAvailable(doctor, { start_iso: args.start_iso });
   if (!check.available) {
     return { ok: false, error: check.reason ?? "Unavailable.", alternatives: check.alternatives };
   }
 
-  const start = parseIsoToClinic(args.start_iso, ctx.clinic);
+  const start = parseIsoToClinic(args.start_iso, doctor);
   const startUtc = toUtcIso(start);
-  const endUtc = toUtcIso(endOfSlot(start, ctx.clinic));
+  const endUtc = toUtcIso(endOfSlot(start, doctor));
 
   try {
     const result = db
       .prepare(
-        `INSERT INTO appointments (patient_name, phone, start_utc, end_utc, reason, clinic_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO appointments (patient_name, phone, start_utc, end_utc, reason, clinic_id, doctor_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(name, ctx.phone, startUtc, endUtc, args.reason ?? null, ctx.clinic.id);
+      .run(name, ctx.phone, startUtc, endUtc, args.reason ?? null, ctx.clinic.id, doctor.id);
     emitAppointmentsChanged(ctx.clinic.id);
     return {
       ok: true,
       appointment: {
         id: Number(result.lastInsertRowid),
         start_iso: startUtc,
-        label: humanLocal(start, ctx.clinic),
+        label: humanLocal(start, doctor),
         clinic_name: ctx.clinic.name,
         clinic_code: ctx.clinic.code,
+        doctor_name: doctor.name,
+        doctor_code: doctor.code,
       },
     };
   } catch (e: any) {
     // partial unique-index violation = race condition
     if (String(e?.message ?? "").includes("UNIQUE")) {
-      const alt = checkSlotAvailable(ctx.clinic, { start_iso: args.start_iso });
+      const alt = checkSlotAvailable(doctor, { start_iso: args.start_iso });
       return { ok: false, error: "Slot was just taken.", alternatives: alt.alternatives };
     }
     throw e;
@@ -65,6 +79,7 @@ export function findAppointments(ctx: ToolContext): {
     reason: string | null;
     clinic_name: string;
     clinic_code: string;
+    doctor_name: string | null;
   }[];
 } {
   // "Now" is an absolute instant; any clinic's clock yields the same UTC cutoff.
@@ -79,8 +94,9 @@ export function findAppointments(ctx: ToolContext): {
 
   const upcoming = [];
   for (const r of rows) {
-    // Label each appointment in its own clinic's timezone.
+    // Label each appointment in its own clinic's timezone; name its doctor.
     const rowClinic = getClinic(r.clinic_id) ?? ctx.clinic;
+    const rowDoctor = getDoctor(r.doctor_id);
     upcoming.push({
       id: r.id,
       start_iso: r.start_utc,
@@ -89,6 +105,7 @@ export function findAppointments(ctx: ToolContext): {
       reason: r.reason,
       clinic_name: rowClinic.name,
       clinic_code: rowClinic.code,
+      doctor_name: rowDoctor?.name ?? null,
     });
   }
   return { upcoming };
@@ -106,20 +123,22 @@ function ownAppointment(ctx: ToolContext, id: number): AppointmentRow | null {
 export function rescheduleAppointment(
   ctx: ToolContext,
   args: { appointment_id: number; new_start_iso: string },
-): { ok: boolean; appointment?: { id: number; start_iso: string; label: string; clinic_name: string; clinic_code: string }; error?: string; alternatives?: { start_iso: string; label: string }[] } {
+): { ok: boolean; appointment?: BookedAppointment; error?: string; alternatives?: { start_iso: string; label: string }[] } {
   const row = ownAppointment(ctx, args.appointment_id);
   if (!row) return { ok: false, error: "Appointment not found for your number." };
   if (row.status !== "booked") return { ok: false, error: "Appointment is not active." };
 
-  // Validate against the appointment's own clinic, not whichever is active.
+  // Validate against the appointment's own doctor, not whichever is active.
+  const doctor = getDoctor(row.doctor_id);
+  if (!doctor) return { ok: false, error: "Appointment's doctor is unavailable." };
   const clinic = getClinic(row.clinic_id) ?? ctx.clinic;
-  const check = checkSlotAvailable(clinic, { start_iso: args.new_start_iso });
+  const check = checkSlotAvailable(doctor, { start_iso: args.new_start_iso });
   if (!check.available) {
     return { ok: false, error: check.reason ?? "Unavailable.", alternatives: check.alternatives };
   }
-  const start = parseIsoToClinic(args.new_start_iso, clinic);
+  const start = parseIsoToClinic(args.new_start_iso, doctor);
   const startUtc = toUtcIso(start);
-  const endUtc = toUtcIso(endOfSlot(start, clinic));
+  const endUtc = toUtcIso(endOfSlot(start, doctor));
 
   try {
     db.prepare(
@@ -131,14 +150,16 @@ export function rescheduleAppointment(
       appointment: {
         id: row.id,
         start_iso: startUtc,
-        label: humanLocal(start, clinic),
+        label: humanLocal(start, doctor),
         clinic_name: clinic.name,
         clinic_code: clinic.code,
+        doctor_name: doctor.name,
+        doctor_code: doctor.code,
       },
     };
   } catch (e: any) {
     if (String(e?.message ?? "").includes("UNIQUE")) {
-      const alt = checkSlotAvailable(ctx.clinic, { start_iso: args.new_start_iso });
+      const alt = checkSlotAvailable(doctor, { start_iso: args.new_start_iso });
       return { ok: false, error: "Slot was just taken.", alternatives: alt.alternatives };
     }
     throw e;

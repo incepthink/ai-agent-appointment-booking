@@ -1,4 +1,4 @@
-import type { Appointment, Clinic, SlotsResponse } from "./types";
+import type { Appointment, Clinic, Doctor, SlotsResponse } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 const TOKEN_KEY = "clinic_token";
@@ -64,7 +64,7 @@ async function request<T>(path: string, options: RequestInit = {}, auth = true):
 
 export const api = {
   login: (email: string, password: string) =>
-    request<{ token: string; clinic: Clinic }>(
+    request<{ token: string; doctor: Doctor; clinic: Clinic }>(
       "/auth/login",
       { method: "POST", body: JSON.stringify({ email, password }) },
       false,
@@ -81,16 +81,26 @@ export const api = {
   updateClinic: (fields: Partial<Omit<Clinic, "id" | "code" | "email">>) =>
     request<{ clinic: Clinic }>("/clinic", { method: "PUT", body: JSON.stringify(fields) }),
 
-  listAppointments: (params: { from?: string; to?: string; status?: string } = {}) => {
+  // The logged-in doctor's own profile + working hours.
+  getMe: () => request<{ doctor: Doctor }>("/me"),
+
+  updateMe: (fields: Partial<Pick<Doctor, "name" | "specialty" | "bio" | "open" | "close" | "days" | "slotMinutes">>) =>
+    request<{ doctor: Doctor }>("/me", { method: "PUT", body: JSON.stringify(fields) }),
+
+  // All doctors at the clinic (roster) — powers the filter + booking picker.
+  listDoctors: () => request<{ doctors: Doctor[] }>("/doctors"),
+
+  listAppointments: (params: { from?: string; to?: string; status?: string; doctorId?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.from) q.set("from", params.from);
     if (params.to) q.set("to", params.to);
     if (params.status) q.set("status", params.status);
+    if (params.doctorId !== undefined) q.set("doctor_id", String(params.doctorId));
     const qs = q.toString();
     return request<{ appointments: Appointment[] }>(`/appointments${qs ? `?${qs}` : ""}`);
   },
 
-  createAppointment: (input: { patient_name: string; phone: string; start_iso: string; reason?: string }) =>
+  createAppointment: (input: { patient_name: string; phone: string; start_iso: string; reason?: string; doctor_id: number }) =>
     request<{ appointment: Appointment }>("/appointments", {
       method: "POST",
       body: JSON.stringify(input),
@@ -105,7 +115,8 @@ export const api = {
   cancel: (id: number) =>
     request<{ appointment: Appointment }>(`/appointments/${id}/cancel`, { method: "PATCH" }),
 
-  getSlots: (date: string) => request<SlotsResponse>(`/slots?date=${date}`),
+  getSlots: (date: string, doctorId: number) =>
+    request<SlotsResponse>(`/slots?date=${date}&doctor_id=${doctorId}`),
 
   // SSE stream URL for live appointment updates. EventSource can't send an
   // Authorization header, so the token rides as a query param. Returns null

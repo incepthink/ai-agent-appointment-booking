@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Clock4, Building2, Sparkles, KeyRound } from "lucide-react";
+import { Clock4, Building2, Sparkles, KeyRound, Stethoscope } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { COMMON_TIMEZONES, type Day } from "@/lib/types";
 import { Button, Card, Field, Input, Select, Textarea } from "@/components/ui";
@@ -11,22 +11,28 @@ import { useClinic } from "@/components/clinic-context";
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const { clinic, setClinic } = useClinic();
+  const { clinic, setClinic, doctor, setDoctor } = useClinic();
 
-  // Availability
-  const [tz, setTz] = useState(clinic.tz);
-  const [open, setOpen] = useState(clinic.open);
-  const [close, setClose] = useState(clinic.close);
-  const [days, setDays] = useState<Day[]>(clinic.days);
-  const [slotMinutes, setSlotMinutes] = useState(clinic.slotMinutes);
+  // My availability (doctor's own hours)
+  const [open, setOpen] = useState(doctor.open);
+  const [close, setClose] = useState(doctor.close);
+  const [days, setDays] = useState<Day[]>(doctor.days);
+  const [slotMinutes, setSlotMinutes] = useState(doctor.slotMinutes);
   const [savingAvail, setSavingAvail] = useState(false);
 
-  // Profile
+  // My profile (doctor)
+  const [docName, setDocName] = useState(doctor.name);
+  const [specialty, setSpecialty] = useState(doctor.specialty);
+  const [bio, setBio] = useState(doctor.bio ?? "");
+  const [savingDoc, setSavingDoc] = useState(false);
+
+  // Clinic profile (shared)
+  const [tz, setTz] = useState(clinic.tz);
   const [name, setName] = useState(clinic.name);
   const [address, setAddress] = useState(clinic.address ?? "");
   const [contactPhone, setContactPhone] = useState(clinic.contactPhone ?? "");
   const [description, setDescription] = useState(clinic.description ?? "");
-  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingClinic, setSavingClinic] = useState(false);
 
   // Security (change password)
   const [currentPassword, setCurrentPassword] = useState("");
@@ -41,14 +47,14 @@ export default function SettingsPage() {
   async function saveAvailability(e: React.FormEvent) {
     e.preventDefault();
     if (days.length === 0) {
-      toast("Pick at least one open day", "error");
+      toast("Pick at least one working day", "error");
       return;
     }
     setSavingAvail(true);
     try {
-      const { clinic: updated } = await api.updateClinic({ tz, open, close, days, slotMinutes });
-      setClinic(updated);
-      toast("Availability saved — the agent now uses these hours", "success");
+      const { doctor: updated } = await api.updateMe({ open, close, days, slotMinutes });
+      setDoctor(updated);
+      toast("Availability saved — the agent now uses your hours", "success");
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "Save failed", "error");
     } finally {
@@ -56,22 +62,41 @@ export default function SettingsPage() {
     }
   }
 
-  async function saveProfile(e: React.FormEvent) {
+  async function saveDoctorProfile(e: React.FormEvent) {
     e.preventDefault();
-    setSavingProfile(true);
+    setSavingDoc(true);
+    try {
+      const { doctor: updated } = await api.updateMe({
+        name: docName,
+        specialty,
+        bio: bio || null,
+      });
+      setDoctor(updated);
+      toast("Profile saved", "success");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : "Save failed", "error");
+    } finally {
+      setSavingDoc(false);
+    }
+  }
+
+  async function saveClinic(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingClinic(true);
     try {
       const { clinic: updated } = await api.updateClinic({
+        tz,
         name,
         address: address || null,
         contactPhone: contactPhone || null,
         description: description || null,
       });
       setClinic(updated);
-      toast("Profile saved", "success");
+      toast("Clinic saved", "success");
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "Save failed", "error");
     } finally {
-      setSavingProfile(false);
+      setSavingClinic(false);
     }
   }
 
@@ -104,31 +129,24 @@ export default function SettingsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          Control what your WhatsApp agent offers patients
+          Manage your own hours and profile at {clinic.name}
         </p>
       </div>
 
-      {/* Availability */}
+      {/* My availability */}
       <Card className="mb-6 p-6">
         <div className="mb-5 flex items-center gap-2.5">
           <div className="flex size-9 items-center justify-center rounded-lg bg-indigo-50 text-brand">
             <Clock4 className="size-5" />
           </div>
           <div>
-            <h2 className="font-semibold text-slate-900">Availability</h2>
-            <p className="text-xs text-slate-400">Hours, days, and slot length the agent books within</p>
+            <h2 className="font-semibold text-slate-900">My availability</h2>
+            <p className="text-xs text-slate-400">Hours, days, and slot length the agent books you within ({clinic.tz})</p>
           </div>
         </div>
 
         <form onSubmit={saveAvailability} className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Timezone">
-              <Select value={tz} onChange={(e) => setTz(e.target.value)}>
-                {tzOptions.map((z) => (
-                  <option key={z} value={z}>{z}</option>
-                ))}
-              </Select>
-            </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Opens">
               <Input type="time" value={open} onChange={(e) => setOpen(e.target.value)} />
             </Field>
@@ -137,7 +155,7 @@ export default function SettingsPage() {
             </Field>
           </div>
 
-          <Field label="Open days">
+          <Field label="Working days">
             <DaysPicker value={days} onChange={setDays} />
           </Field>
 
@@ -155,35 +173,74 @@ export default function SettingsPage() {
         </form>
       </Card>
 
-      {/* Profile */}
+      {/* My profile (doctor) */}
+      <Card className="mb-6 p-6">
+        <div className="mb-5 flex items-center gap-2.5">
+          <div className="flex size-9 items-center justify-center rounded-lg bg-indigo-50 text-brand">
+            <Stethoscope className="size-5" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-slate-900">My profile</h2>
+            <p className="text-xs text-slate-400">The agent uses your specialty to route patients to you</p>
+          </div>
+        </div>
+
+        <form onSubmit={saveDoctorProfile} className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Display name">
+              <Input value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="Dr. Jane Doe" />
+            </Field>
+            <Field label="Specialty">
+              <Input value={specialty} onChange={(e) => setSpecialty(e.target.value)} placeholder="General Physician" />
+            </Field>
+          </div>
+          <Field label="Bio" hint="What you treat — helps the agent recommend you for the right reasons">
+            <Textarea rows={3} value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Skin, hair and nails: rashes, acne, eczema…" />
+          </Field>
+          <div className="flex justify-end">
+            <Button type="submit" loading={savingDoc}>Save profile</Button>
+          </div>
+        </form>
+      </Card>
+
+      {/* Clinic (shared) */}
       <Card className="p-6">
         <div className="mb-5 flex items-center gap-2.5">
           <div className="flex size-9 items-center justify-center rounded-lg bg-indigo-50 text-brand">
             <Building2 className="size-5" />
           </div>
           <div>
-            <h2 className="font-semibold text-slate-900">Clinic profile</h2>
-            <p className="text-xs text-slate-400">How your clinic presents itself</p>
+            <h2 className="font-semibold text-slate-900">Clinic</h2>
+            <p className="text-xs text-slate-400">Shared by all doctors at {clinic.name}</p>
           </div>
         </div>
 
-        <form onSubmit={saveProfile} className="space-y-5">
+        <form onSubmit={saveClinic} className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Clinic name">
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
+            <Field label="Timezone">
+              <Select value={tz} onChange={(e) => setTz(e.target.value)}>
+                {tzOptions.map((z) => (
+                  <option key={z} value={z}>{z}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Contact phone">
               <Input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="+91 90000 00000" />
             </Field>
+            <Field label="Address">
+              <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="12 Main Street, City" />
+            </Field>
           </div>
-          <Field label="Address">
-            <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="12 Main Street, City" />
-          </Field>
           <Field label="Description" hint="Short blurb about the clinic / services">
-            <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Family dental practice offering…" />
+            <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Family practice offering…" />
           </Field>
           <div className="flex justify-end">
-            <Button type="submit" loading={savingProfile}>Save profile</Button>
+            <Button type="submit" loading={savingClinic}>Save clinic</Button>
           </div>
         </form>
       </Card>

@@ -5,6 +5,12 @@ import {
   listActiveClinics,
   setActiveClinic,
 } from "../clinics";
+import {
+  getActiveDoctor,
+  getDoctorByCode,
+  listClinicDoctors,
+  setActiveDoctor,
+} from "../doctors";
 import { nowInClinicTz } from "./time";
 import { checkSlotAvailable, listAvailableSlots } from "./slots";
 import {
@@ -43,6 +49,31 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "list_doctors",
+      description:
+        "Lists the doctors at the active clinic with their specialty and working hours. Use this to recommend a doctor for the patient's reason for visit, or to show the other options if the patient declines your suggestion.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "select_doctor",
+      description:
+        "Sets the doctor the patient will book with (also used to switch doctor). Use the doctor's short code from list_doctors. All subsequent slot and booking actions apply to this doctor. Call this once the patient has agreed to a doctor.",
+      parameters: {
+        type: "object",
+        properties: {
+          code: { type: "string", description: "The doctor's short code, e.g. LOTUS-MEHTA." },
+        },
+        required: ["code"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_current_datetime",
       description:
         "Returns the current date and time in the active clinic's timezone. Call this whenever the user uses relative time words like 'today', 'tomorrow', 'this evening', 'next week'.",
@@ -54,7 +85,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "list_available_slots",
       description:
-        "Lists available appointment start times for a given date at the active clinic. Optionally filter by part of day.",
+        "Lists available appointment start times for a given date with the SELECTED DOCTOR. A doctor must be selected first (select_doctor). Optionally filter by part of day.",
       parameters: {
         type: "object",
         properties: {
@@ -75,7 +106,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "check_slot_available",
       description:
-        "Checks whether a specific start time is available at the active clinic. Returns alternatives if not.",
+        "Checks whether a specific start time is available with the SELECTED DOCTOR. A doctor must be selected first. Returns alternatives if not.",
       parameters: {
         type: "object",
         properties: {
@@ -94,7 +125,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "create_appointment",
       description:
-        "Creates a booking at the active clinic. Only call AFTER the patient has explicitly confirmed name, time, and reason. Phone is already known — do not ask for it and do not pass it.",
+        "Creates a booking with the SELECTED DOCTOR at the active clinic. A doctor must be selected first. Only call AFTER the patient has explicitly confirmed the doctor, name, time, and reason. Phone is already known — do not ask for it and do not pass it.",
       parameters: {
         type: "object",
         properties: {
@@ -153,6 +184,21 @@ const NO_CLINIC = {
   error: "No clinic selected. Use list_clinics to show the options, then select_clinic before booking.",
 };
 
+const NO_DOCTOR = {
+  error: "No doctor selected. Use list_doctors to see the clinic's doctors, recommend one for the patient's reason, then select_doctor before checking slots or booking.",
+};
+
+function doctorSummary(d: { code: string; name: string; specialty: string; bio: string | null; open: string; close: string; days: string[] }) {
+  return {
+    code: d.code,
+    name: d.name,
+    specialty: d.specialty,
+    bio: d.bio,
+    hours: `${d.open}-${d.close}`,
+    days: d.days.join(", "),
+  };
+}
+
 export function dispatchTool(
   name: string,
   rawArgs: string,
@@ -203,6 +249,22 @@ export function dispatchTool(
   if (!clinic) return NO_CLINIC;
   const ctx = { phone, clinic };
 
+  // Doctor-roster + selection tools need a clinic but not an active doctor.
+  if (name === "list_doctors") {
+    return { doctors: listClinicDoctors(clinic.id).map(doctorSummary) };
+  }
+  if (name === "select_doctor") {
+    const doctor = getDoctorByCode(String(args.code ?? ""));
+    if (!doctor || doctor.clinicId !== clinic.id) {
+      return {
+        ok: false,
+        error: `Unknown doctor code "${args.code}" at ${clinic.name}. Call list_doctors for valid codes.`,
+      };
+    }
+    setActiveDoctor(phone, doctor.id);
+    return { ok: true, doctor: doctorSummary(doctor) };
+  }
+
   switch (name) {
     case "get_current_datetime": {
       const now = nowInClinicTz(clinic);
@@ -218,12 +280,21 @@ export function dispatchTool(
         slot_minutes: clinic.slotMinutes,
       };
     }
-    case "list_available_slots":
-      return listAvailableSlots(clinic, args);
-    case "check_slot_available":
-      return checkSlotAvailable(clinic, args);
-    case "create_appointment":
-      return createAppointment(ctx, args);
+    case "list_available_slots": {
+      const doctor = getActiveDoctor(phone);
+      if (!doctor) return NO_DOCTOR;
+      return listAvailableSlots(doctor, args);
+    }
+    case "check_slot_available": {
+      const doctor = getActiveDoctor(phone);
+      if (!doctor) return NO_DOCTOR;
+      return checkSlotAvailable(doctor, args);
+    }
+    case "create_appointment": {
+      const doctor = getActiveDoctor(phone);
+      if (!doctor) return NO_DOCTOR;
+      return createAppointment(ctx, doctor, args);
+    }
     case "find_appointments":
       return findAppointments(ctx);
     case "reschedule_appointment":

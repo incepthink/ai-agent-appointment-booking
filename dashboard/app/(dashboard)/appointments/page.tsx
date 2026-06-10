@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Plus, Calendar, Phone, Clock, MoreHorizontal, CalendarX2, ArrowLeft } from "lucide-react";
+import { Plus, Calendar, Phone, Clock, MoreHorizontal, CalendarX2, ArrowLeft, Stethoscope } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Appointment } from "@/lib/types";
-import { Button, Card, Badge, Spinner } from "@/components/ui";
+import { Button, Card, Badge, Spinner, Select } from "@/components/ui";
 import { Modal } from "@/components/modal";
 import { BookingModal } from "@/components/booking-modal";
 import { AppointmentCalendar } from "@/components/appointment-calendar";
@@ -20,11 +20,13 @@ import {
 
 export default function AppointmentsPage() {
   const { toast } = useToast();
-  const { clinic } = useClinic();
+  const { clinic, doctors } = useClinic();
   const tz = clinic.tz;
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
+  // Unified clinic view: show every doctor by default, or filter to one.
+  const [doctorFilter, setDoctorFilter] = useState<number | "all">("all");
 
   // Visible month + the day whose appointments are shown below the calendar.
   const initial = useMemo(() => keyToMonth(todayKey(tz)), [tz]);
@@ -112,17 +114,23 @@ export default function AppointmentsPage() {
     setBookingOpen(true);
   }
 
+  // Apply the doctor filter (client-side over the loaded month).
+  const visible = useMemo(
+    () => (doctorFilter === "all" ? appointments : appointments.filter((a) => a.doctor_id === doctorFilter)),
+    [appointments, doctorFilter],
+  );
+
   // Appointments for the selected day, sorted chronologically.
   const dayAppointments = useMemo(() => {
     if (!selectedKey) return [];
-    return appointments
+    return visible
       .filter((a) => dayKey(a.start_iso, tz) === selectedKey)
       .sort((a, b) => a.start_iso.localeCompare(b.start_iso));
-  }, [appointments, selectedKey, tz]);
+  }, [visible, selectedKey, tz]);
 
   // Whole-month appointments grouped by day (used when no day is selected).
   const monthGroups = useMemo(() => {
-    const inMonth = appointments
+    const inMonth = visible
       .filter((a) => {
         const { year, month } = keyToMonth(dayKey(a.start_iso, tz));
         return year === view.year && month === view.month;
@@ -135,7 +143,7 @@ export default function AppointmentsPage() {
       map.get(day)!.push(a);
     }
     return Array.from(map.entries());
-  }, [appointments, tz, view.year, view.month]);
+  }, [visible, tz, view.year, view.month]);
 
   const canBookSelected = selectedKey ? selectedKey >= todayKey(tz) : false;
 
@@ -153,6 +161,11 @@ export default function AppointmentsPage() {
             <span className="inline-flex items-center gap-1">
               <Phone className="size-3" /> {a.phone}
             </span>
+            {a.doctor_name && (
+              <span className="inline-flex items-center gap-1 font-medium text-slate-500">
+                <Stethoscope className="size-3" /> {a.doctor_name}
+              </span>
+            )}
             {a.reason && <span className="truncate">· {a.reason}</span>}
           </div>
         </div>
@@ -203,12 +216,27 @@ export default function AppointmentsPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Appointments</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Bookings made by you and the WhatsApp agent</p>
+          <p className="mt-0.5 text-sm text-slate-500">All bookings at {clinic.name}, across every doctor</p>
         </div>
-        <Button onClick={() => openBooking(canBookSelected && selectedKey ? selectedKey : undefined)}>
-          <Plus className="size-4" />
-          New appointment
-        </Button>
+        <div className="flex items-center gap-2">
+          {doctors.length > 1 && (
+            <Select
+              aria-label="Filter by doctor"
+              className="w-44"
+              value={String(doctorFilter)}
+              onChange={(e) => setDoctorFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+            >
+              <option value="all">All doctors</option>
+              {doctors.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </Select>
+          )}
+          <Button onClick={() => openBooking(canBookSelected && selectedKey ? selectedKey : undefined)}>
+            <Plus className="size-4" />
+            New appointment
+          </Button>
+        </div>
       </div>
 
       {/* Two-column on desktop (mini calendar left, list right); stacked on mobile */}
@@ -216,7 +244,7 @@ export default function AppointmentsPage() {
         {/* Mini calendar — sticky on desktop, centered & capped on mobile */}
         <div className="mx-auto w-full max-w-xs lg:mx-0 lg:max-w-none lg:sticky lg:top-8">
           <AppointmentCalendar
-            appointments={appointments}
+            appointments={visible}
             tz={tz}
             openDays={clinic.days}
             year={view.year}

@@ -17,10 +17,16 @@ import {
   getClinicByEmail,
   getClinicProfile,
   updateClinic,
-  setClinicPassword,
 } from "./clinics";
+import {
+  getDoctor,
+  getDoctorProfile,
+  getDoctorRowByEmail,
+  listClinicDoctors,
+  updateDoctor,
+  setDoctorPassword,
+} from "./doctors";
 import { listAvailableSlots } from "./tools/slots";
-import { getClinic } from "./clinics";
 import {
   listClinicAppointments,
   adminCreateAppointment,
@@ -93,7 +99,8 @@ apiRouter.post("/auth/login", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: "Email and password are required." });
   }
-  const row = getClinicByEmail(parsed.data.email);
+  // Doctors log in with their own credentials; the clinic comes from the doctor.
+  const row = getDoctorRowByEmail(parsed.data.email);
   if (!row || !row.password_hash) {
     return res.status(401).json({ error: "Invalid email or password." });
   }
@@ -102,7 +109,11 @@ apiRouter.post("/auth/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid email or password." });
   }
   const token = signToken(row.id);
-  res.json({ token, clinic: getClinicProfile(row.id) });
+  res.json({
+    token,
+    doctor: getDoctorProfile(row.id),
+    clinic: getClinicProfile(row.clinic_id),
+  });
 });
 
 const changePasswordSchema = z.object({
@@ -115,9 +126,9 @@ apiRouter.post("/auth/change-password", requireAuth, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input." });
   }
-  const profile = getClinicProfile(req.clinicId!);
-  if (!profile?.email) return res.status(404).json({ error: "Clinic not found." });
-  const row = getClinicByEmail(profile.email);
+  const profile = getDoctorProfile(req.doctorId!);
+  if (!profile?.email) return res.status(404).json({ error: "Account not found." });
+  const row = getDoctorRowByEmail(profile.email);
   if (!row || !row.password_hash) {
     return res.status(400).json({ error: "Password change is unavailable for this account." });
   }
@@ -125,7 +136,7 @@ apiRouter.post("/auth/change-password", requireAuth, async (req, res) => {
   if (!ok) {
     return res.status(401).json({ error: "Current password is incorrect." });
   }
-  setClinicPassword(row.id, await hashPassword(parsed.data.newPassword));
+  setDoctorPassword(row.id, await hashPassword(parsed.data.newPassword));
   res.json({ ok: true });
 });
 
@@ -159,14 +170,63 @@ apiRouter.put("/clinic", requireAuth, (req, res) => {
   res.json({ clinic });
 });
 
+// --- Logged-in doctor: own profile + working hours (authenticated) ---
+
+apiRouter.get("/me", requireAuth, (req, res) => {
+  const doctor = getDoctorProfile(req.doctorId!);
+  if (!doctor) return res.status(404).json({ error: "Account not found." });
+  res.json({ doctor });
+});
+
+const updateMeSchema = z.object({
+  name: z.string().min(1).optional(),
+  specialty: z.string().min(1).optional(),
+  bio: z.string().nullable().optional(),
+  open: hhmm.optional(),
+  close: hhmm.optional(),
+  days: daysSchema.optional(),
+  slotMinutes: z.coerce.number().int().positive().optional(),
+});
+
+apiRouter.put("/me", requireAuth, (req, res) => {
+  const parsed = updateMeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input." });
+  }
+  const doctor = updateDoctor(req.doctorId!, parsed.data);
+  if (!doctor) return res.status(404).json({ error: "Account not found." });
+  res.json({ doctor });
+});
+
+// --- Clinic doctor roster (authenticated) — powers the dashboard filter + booking picker ---
+
+apiRouter.get("/doctors", requireAuth, (req, res) => {
+  const doctors = listClinicDoctors(req.clinicId!).map((d) => ({
+    id: d.id,
+    code: d.code,
+    name: d.name,
+    specialty: d.specialty,
+    bio: d.bio,
+    open: d.open,
+    close: d.close,
+    days: d.days,
+    slotMinutes: d.slotMinutes,
+  }));
+  res.json({ doctors });
+});
+
 // --- Appointments (authenticated, clinic-scoped) ---
 
 apiRouter.get("/appointments", requireAuth, (req, res) => {
-  const { from, to, status } = req.query;
+  const { from, to, status, doctor_id } = req.query;
+  const doctorId = typeof doctor_id === "string" && Number.isInteger(Number(doctor_id))
+    ? Number(doctor_id)
+    : undefined;
   const appointments = listClinicAppointments(req.clinicId!, {
     from: typeof from === "string" ? from : undefined,
     to: typeof to === "string" ? to : undefined,
     status: status === "booked" || status === "cancelled" ? status : undefined,
+    doctorId,
   });
   res.json({ appointments });
 });
@@ -188,8 +248,13 @@ apiRouter.get("/appointments/stream", (req, res) => {
   res.write(": connected\n\n");
 
   // Comment pings keep the connection alive through proxies/idle timeouts.
+  const doctor = getDoctor(payload.doctorId);
+  if (!doctor) {
+    res.status(401).end();
+    return;
+  }
   const ping = setInterval(() => res.write(": ping\n\n"), 25000);
-  const unsubscribe = subscribeAppointments(payload.clinicId, () => {
+  const unsubscribe = subscribeAppointments(doctor.clinicId, () => {
     res.write("event: appointments\ndata: {}\n\n");
   });
 
@@ -204,6 +269,7 @@ const createSchema = z.object({
   phone: z.string().min(1),
   start_iso: z.string().min(1),
   reason: z.string().optional(),
+  doctor_id: z.coerce.number().int().positive(),
 });
 
 apiRouter.post("/appointments", requireAuth, (req, res) => {
@@ -247,7 +313,13 @@ apiRouter.get("/slots", requireAuth, (req, res) => {
   if (typeof date !== "string") {
     return res.status(400).json({ error: "date (YYYY-MM-DD) is required." });
   }
-  const clinic = getClinic(req.clinicId!);
-  if (!clinic) return res.status(404).json({ error: "Clinic not found." });
-  res.json(listAvailableSlots(clinic, { date }));
+  const doctorId = Number(req.query.doctor_id);
+  if (!Number.isInteger(doctorId)) {
+    return res.status(400).json({ error: "doctor_id is required." });
+  }
+  const doctor = getDoctor(doctorId);
+  if (!doctor || doctor.clinicId !== req.clinicId!) {
+    return res.status(404).json({ error: "Doctor not found at this clinic." });
+  }
+  res.json(listAvailableSlots(doctor, { date }));
 });

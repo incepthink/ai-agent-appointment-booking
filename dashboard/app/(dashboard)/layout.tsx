@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { CalendarDays, Settings, LogOut, Menu, X, CalendarHeart } from "lucide-react";
 import { api, getToken, clearToken } from "@/lib/api";
-import type { Clinic } from "@/lib/types";
+import type { Clinic, Doctor } from "@/lib/types";
 import { Spinner } from "@/components/ui";
 import { ClinicProvider } from "@/components/clinic-context";
 import { cn } from "@/lib/cn";
@@ -19,6 +19,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const pathname = usePathname();
   const [clinic, setClinic] = useState<Clinic | null>(null);
+  const [doctor, setDoctor] = useState<Doctor | null>(null);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -26,9 +28,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       router.replace("/login");
       return;
     }
-    api
-      .getClinic()
-      .then((r) => setClinic(r.clinic))
+    Promise.all([api.getMe(), api.getClinic(), api.listDoctors()])
+      .then(([me, c, roster]) => {
+        setDoctor(me.doctor);
+        setClinic(c.clinic);
+        setDoctors(roster.doctors);
+      })
       .catch(() => {
         clearToken();
         router.replace("/login");
@@ -40,7 +45,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.replace("/login");
   }
 
-  if (!clinic) {
+  if (!clinic || !doctor) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Spinner className="size-6 text-brand" />
@@ -56,7 +61,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-slate-900">{clinic.name}</p>
-          <p className="truncate text-xs text-slate-400">{clinic.code}</p>
+          <p className="truncate text-xs text-slate-400">{doctor.name}</p>
         </div>
       </div>
 
@@ -93,7 +98,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   );
 
   return (
-    <ClinicProvider initial={clinic}>
+    <ClinicProvider initialClinic={clinic} initialDoctor={doctor} doctors={doctors}>
       <div className="flex min-h-screen">
         {/* Desktop sidebar */}
         <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:block">

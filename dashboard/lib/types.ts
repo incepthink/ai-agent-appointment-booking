@@ -16,6 +16,20 @@ export type Clinic = {
   description: string | null;
 };
 
+// A doctor at the clinic. The roster (/doctors) omits email; /me includes it.
+export type Doctor = {
+  id: number;
+  code: string;
+  name: string;
+  specialty: string;
+  bio: string | null;
+  open: string;
+  close: string;
+  days: Day[];
+  slotMinutes: number;
+  email?: string | null;
+};
+
 export type Appointment = {
   id: number;
   patient_name: string;
@@ -25,6 +39,8 @@ export type Appointment = {
   label: string;
   reason: string | null;
   status: "booked" | "cancelled";
+  doctor_id: number | null;
+  doctor_name: string | null;
   created_at: string;
 };
 

@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import crypto from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
 import { config } from "./config";
+import { getDoctor } from "./doctors";
 
 const TOKEN_TTL = "7d";
 
@@ -24,21 +25,24 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
-export function signToken(clinicId: number): string {
-  return jwt.sign({ clinicId }, config.jwtSecret, { expiresIn: TOKEN_TTL });
+// Tokens identify a DOCTOR; the clinic is derived from the doctor on each request
+// so all doctors of a clinic share the same unified clinic view.
+export function signToken(doctorId: number): string {
+  return jwt.sign({ doctorId }, config.jwtSecret, { expiresIn: TOKEN_TTL });
 }
 
-export function verifyToken(token: string): { clinicId: number } | null {
+export function verifyToken(token: string): { doctorId: number } | null {
   try {
-    const decoded = jwt.verify(token, config.jwtSecret) as { clinicId?: unknown };
-    if (typeof decoded.clinicId === "number") return { clinicId: decoded.clinicId };
+    const decoded = jwt.verify(token, config.jwtSecret) as { doctorId?: unknown };
+    if (typeof decoded.doctorId === "number") return { doctorId: decoded.doctorId };
     return null;
   } catch {
     return null;
   }
 }
 
-// Express middleware: requires a valid Bearer token, attaches clinicId to the request.
+// Express middleware: requires a valid Bearer token, attaches the authenticated
+// doctorId AND its clinicId (resolved from the doctor) to the request.
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const header = req.header("authorization") ?? "";
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -51,7 +55,13 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     res.status(401).json({ error: "Invalid or expired token." });
     return;
   }
-  req.clinicId = payload.clinicId;
+  const doctor = getDoctor(payload.doctorId);
+  if (!doctor) {
+    res.status(401).json({ error: "Account no longer exists." });
+    return;
+  }
+  req.doctorId = doctor.id;
+  req.clinicId = doctor.clinicId;
   next();
 }
 
@@ -66,12 +76,13 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   next();
 }
 
-// Augment Express's Request with the authenticated clinic id.
+// Augment Express's Request with the authenticated doctor + its clinic id.
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       clinicId?: number;
+      doctorId?: number;
     }
   }
 }

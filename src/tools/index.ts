@@ -26,7 +26,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "list_clinics",
       description:
-        "Lists the clinics the patient can book at. Call this when the patient hasn't picked a clinic yet, or asks which clinics are available, or wants to switch.",
+        "Lists the clinics the patient can book at. The available clinics are already in your instructions — only call this as a fallback if that list seems stale or missing.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -132,7 +132,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           patient_name: {
             type: "string",
             description:
-              'The actual name of the person who will be seen by the doctor — a real name the patient gave you, never a relationship word like "grandmother" or "my son". If you only know the patient by their relationship to the sender, ask for their name before calling this.',
+              'The actual name of the person who will be seen by the doctor — a real name the patient gave you, never a relationship word like "grandmother" or "my son", and never a placeholder such as "Patient" or "Unknown". If you don\'t have the real name yet, ask for it before calling this.',
           },
           start_iso: { type: "string", description: "ISO 8601 start datetime." },
           reason: { type: "string" },

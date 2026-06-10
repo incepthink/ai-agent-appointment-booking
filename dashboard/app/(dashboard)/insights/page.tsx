@@ -1,7 +1,21 @@
 "use client";
 
 import { useEffect, useState, type ComponentType } from "react";
-import { Gauge, Timer, Cpu, Sparkles, Send, Repeat, Wrench, Coins } from "lucide-react";
+import {
+  Gauge,
+  Timer,
+  Cpu,
+  Sparkles,
+  Send,
+  Repeat,
+  Wrench,
+  Coins,
+  Hourglass,
+  MessagesSquare,
+  CalendarCheck,
+  CircleDollarSign,
+  ChevronDown,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { MetricsSummary, Stat } from "@/lib/types";
 import { Card, Spinner } from "@/components/ui";
@@ -17,6 +31,7 @@ const RANGES: { value: Range; label: string }[] = [
 
 const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 const num = (n: number) => (Number.isInteger(n) ? n.toString() : n.toFixed(1));
+const cost = (usd: number) => (usd > 0 && usd < 0.01 ? "< $0.01" : `$${usd.toFixed(2)}`);
 
 export default function InsightsPage() {
   const [range, setRange] = useState<Range>(7);
@@ -78,21 +93,21 @@ export default function InsightsPage() {
 }
 
 function Content({ data }: { data: MetricsSummary }) {
+  const windowPhrase = data.window_days ? `in the last ${data.window_days} days` : "all-time";
   return (
     <div className="space-y-8">
-      {/* Headline: average patient-perceived response time */}
+      {/* Headline: typical (median) reply time, in plain language */}
       <Card>
         <div className="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
           <div>
             <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
               <Timer className="size-4 text-brand" />
-              Average response time
+              Typical reply time
             </div>
-            <p className="mt-2 text-5xl font-semibold tracking-tight text-slate-900">{secs(data.total.avg)}</p>
+            <p className="mt-2 text-5xl font-semibold tracking-tight text-slate-900">{secs(data.total.p50)}</p>
             <p className="mt-1.5 text-sm text-slate-500">
-              p95 {secs(data.total.p95)} · {data.count.toLocaleString()} message
-              {data.count === 1 ? "" : "s"}
-              {data.window_days ? ` in the last ${data.window_days} days` : ", all-time"}
+              Half of replies arrive within {secs(data.total.p50)} · {data.count.toLocaleString()} message
+              {data.count === 1 ? "" : "s"} {windowPhrase}
             </p>
           </div>
           <div className="flex size-20 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-brand">
@@ -101,47 +116,107 @@ function Content({ data }: { data: MetricsSummary }) {
         </div>
       </Card>
 
-      {/* Breakdown by stage */}
+      {/* What the agent did for the clinic, in plain language */}
       <section>
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Where the time goes</h2>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">At a glance</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <TimingCard icon={Timer} tone="indigo" label="Total" hint="patient-perceived" stat={data.total} />
-          <TimingCard icon={Cpu} tone="sky" label="Agent processing" hint="excludes send" stat={data.handle} />
-          <TimingCard icon={Sparkles} tone="violet" label="LLM time" hint="OpenAI calls" stat={data.llm} />
-          <TimingCard icon={Send} tone="emerald" label="WhatsApp send" hint="delivery" stat={data.send} />
+          <MetricCard
+            icon={Hourglass}
+            tone="amber"
+            label="Slowest replies"
+            value={secs(data.total.p95)}
+            hint="Only 1 in 20 replies takes longer than this."
+          />
+          <MetricCard
+            icon={MessagesSquare}
+            tone="sky"
+            label="Conversations"
+            value={data.conversations.toLocaleString()}
+            hint={`Patients the agent talked to ${windowPhrase}.`}
+          />
+          <MetricCard
+            icon={CalendarCheck}
+            tone="emerald"
+            label="Bookings made"
+            value={data.bookings.toLocaleString()}
+            hint={`Appointments created ${windowPhrase}.`}
+          />
+          <MetricCard
+            icon={CircleDollarSign}
+            tone="violet"
+            label="Estimated AI cost"
+            value={cost(data.est_cost_usd)}
+            hint={`What the agent's AI usage cost ${windowPhrase}.`}
+          />
         </div>
       </section>
 
-      {/* Throughput / cost drivers */}
-      <section>
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Per message</h2>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <MetricCard
-            icon={Repeat}
-            tone="amber"
-            label="LLM round-trips"
-            value={num(data.avg_llm_calls)}
-            hint="The main latency lever — each is a full network call."
-          />
-          <MetricCard
-            icon={Wrench}
-            tone="sky"
-            label="Tool calls"
-            value={num(data.avg_tool_calls)}
-            hint="Booking actions taken per message."
-          />
-          <MetricCard
-            icon={Coins}
-            tone="violet"
-            label="Tokens"
-            value={num(data.avg_prompt_tokens + data.avg_completion_tokens)}
-            hint={`${num(data.avg_prompt_tokens)} in · ${num(data.avg_completion_tokens)} out · ${num(
-              data.avg_cached_tokens,
-            )} cached`}
-          />
-        </div>
-      </section>
+      <TechnicalBreakdown data={data} />
     </div>
+  );
+}
+
+// Engineering detail (percentiles, round-trips, tokens) tucked away so the
+// default view stays owner-friendly.
+function TechnicalBreakdown({ data }: { data: MetricsSummary }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 transition-colors hover:text-slate-600"
+      >
+        Technical breakdown
+        <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-8">
+          {/* Breakdown by stage */}
+          <div>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Where the time goes
+            </h3>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <TimingCard icon={Timer} tone="indigo" label="Total" hint="patient-perceived" stat={data.total} />
+              <TimingCard icon={Cpu} tone="sky" label="Agent processing" hint="excludes send" stat={data.handle} />
+              <TimingCard icon={Sparkles} tone="violet" label="LLM time" hint="OpenAI calls" stat={data.llm} />
+              <TimingCard icon={Send} tone="emerald" label="WhatsApp send" hint="delivery" stat={data.send} />
+            </div>
+          </div>
+
+          {/* Throughput / cost drivers */}
+          <div>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Per message</h3>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <MetricCard
+                icon={Repeat}
+                tone="amber"
+                label="LLM round-trips"
+                value={num(data.avg_llm_calls)}
+                hint="The main latency lever — each is a full network call."
+              />
+              <MetricCard
+                icon={Wrench}
+                tone="sky"
+                label="Tool calls"
+                value={num(data.avg_tool_calls)}
+                hint="Booking actions taken per message."
+              />
+              <MetricCard
+                icon={Coins}
+                tone="violet"
+                label="Tokens"
+                value={num(data.avg_prompt_tokens + data.avg_completion_tokens)}
+                hint={`${num(data.avg_prompt_tokens)} in · ${num(data.avg_completion_tokens)} out · ${num(
+                  data.avg_cached_tokens,
+                )} cached`}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

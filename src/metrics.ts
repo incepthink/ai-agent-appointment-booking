@@ -55,6 +55,10 @@ export function recordMessageMetric(m: MessageMetric): void {
 // A timing distribution for one measurement (all values in ms).
 export type Stat = { avg: number; p50: number; p95: number; max: number };
 
+// gpt-4o-mini, USD per 1M tokens (as of 2026-06). Cached input is billed at
+// half the regular input rate.
+const PRICE = { input: 0.15, cachedInput: 0.075, output: 0.6 };
+
 export type MetricsSummary = {
   window_days: number | null; // null = all time
   count: number;
@@ -67,6 +71,9 @@ export type MetricsSummary = {
   avg_prompt_tokens: number;
   avg_completion_tokens: number;
   avg_cached_tokens: number;
+  conversations: number; // distinct patients the agent talked to in the window
+  bookings: number; // appointments created in the window
+  est_cost_usd: number; // estimated OpenAI spend for the window
 };
 
 type MetricRow = {
@@ -128,6 +135,36 @@ export function getMetricsSummary(days: number | null = 7): MetricsSummary {
     )
     .all(...params) as MetricRow[];
 
+  // Owner-facing totals are uncapped: percentiles tolerate a row cap, but
+  // conversation counts and cost must cover the whole window.
+  const agg = db
+    .prepare(
+      `SELECT COUNT(DISTINCT phone) AS conversations,
+              COALESCE(SUM(prompt_tokens), 0) AS p,
+              COALESCE(SUM(cached_tokens), 0) AS c,
+              COALESCE(SUM(completion_tokens), 0) AS o
+       FROM message_metrics
+       ${where}`,
+    )
+    .get(...params) as { conversations: number; p: number; c: number; o: number };
+
+  // Cached tokens are a subset of prompt tokens; clamp in case of bad data.
+  const billableInput = Math.max(0, agg.p - agg.c);
+  const estCostUsd =
+    (billableInput * PRICE.input + agg.c * PRICE.cachedInput + agg.o * PRICE.output) /
+    1_000_000;
+
+  // "Bookings made" is an activity metric: rows created in the window count
+  // even if later cancelled. The appointments table has no source column, so
+  // dashboard-created bookings are included alongside agent-made ones.
+  const bookingsRow = (
+    days == null
+      ? db.prepare(`SELECT COUNT(*) AS n FROM appointments`).get()
+      : db
+          .prepare(`SELECT COUNT(*) AS n FROM appointments WHERE created_at >= datetime('now', ?)`)
+          .get(`-${days} days`)
+  ) as { n: number };
+
   return {
     window_days: days,
     count: rows.length,
@@ -140,5 +177,8 @@ export function getMetricsSummary(days: number | null = 7): MetricsSummary {
     avg_prompt_tokens: mean(rows.map((r) => r.prompt_tokens)),
     avg_completion_tokens: mean(rows.map((r) => r.completion_tokens)),
     avg_cached_tokens: mean(rows.map((r) => r.cached_tokens)),
+    conversations: agg.conversations,
+    bookings: bookingsRow.n,
+    est_cost_usd: Math.round(estCostUsd * 10_000) / 10_000,
   };
 }

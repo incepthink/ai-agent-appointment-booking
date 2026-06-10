@@ -70,6 +70,9 @@ export type MetricsSummary = {
   avg_prompt_tokens: number;
   avg_completion_tokens: number;
   avg_cached_tokens: number;
+  conversations: number; // distinct patients the agent talked to in the window
+  bookings: number; // appointments created in the window
+  est_cost_usd: number; // estimated OpenAI spend for the window
 };
 
 export const COMMON_TIMEZONES = [

@@ -129,7 +129,11 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       parameters: {
         type: "object",
         properties: {
-          patient_name: { type: "string" },
+          patient_name: {
+            type: "string",
+            description:
+              'The actual name of the person who will be seen by the doctor — a real name the patient gave you, never a relationship word like "grandmother" or "my son". If you only know the patient by their relationship to the sender, ask for their name before calling this.',
+          },
           start_iso: { type: "string", description: "ISO 8601 start datetime." },
           reason: { type: "string" },
         },

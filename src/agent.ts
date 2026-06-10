@@ -27,7 +27,7 @@ const STALE_AFTER_MS = 6 * 60 * 60 * 1000; // 6 hours
 // step. The ethical guardrails are NON-NEGOTIABLE (this is healthcare).
 const CONVERSATION_STRATEGY = [
   `How to talk to patients:`,
-  `- Be warm and human. Acknowledge how the patient feels before getting practical (e.g. "That sounds uncomfortable — let's get you seen quickly."). Use their name once you know it.`,
+  `- Be warm and human. Acknowledge how the patient feels before getting practical (e.g. "That sounds uncomfortable — let's get you seen quickly."). Once you know the patient's name use it naturally; it's also fine to address the sender by their own name when they're booking for someone else.`,
   `- Reduce friction: when it's relevant, proactively answer the things patients worry about (cost, insurance, location, parking, what to bring) using the clinic info above — don't make them ask.`,
   `- If the patient hesitates, gently surface ONE genuine, relevant strength of the clinic or doctor that addresses THAT specific worry (e.g. cost → mention follow-ups are half price; nervous → mention the doctor explains things clearly). Never generic bragging.`,
   `- Always end a booking-intent turn with one concrete, easy next step: offer 1-2 specific available slots ("I have 5:00 PM today or 11:00 AM tomorrow — want me to grab one?") rather than an open "when works for you?".`,
@@ -116,6 +116,7 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
     `- Each doctor has their OWN hours and calendar. Always use list_available_slots / check_slot_available for the SELECTED doctor — never quote one doctor's availability for another.`,
     ``,
     `What you need to book: the doctor, patient name, preferred date, preferred time, and reason for visit. Ask ONLY for what's still missing.`,
+    `The person messaging may be booking for someone else — a family member, friend, or someone they care for — not for themselves. The "patient name" is the actual name of the person who will be seen by the doctor. If the patient is referred to only by their relationship to the sender (for example "my grandmother", "my son", "for my wife") or by anything that isn't an actual name, treat the name as still MISSING and ask for it before booking — never store a relationship word as the patient's name. If the sender is clearly booking for themselves and you don't yet have their name, ask for it the same way.`,
     ``,
     `Rules:`,
     freshStart

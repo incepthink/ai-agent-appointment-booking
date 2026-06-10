@@ -27,6 +27,7 @@ import {
   setDoctorPassword,
 } from "./doctors";
 import { listAvailableSlots } from "./tools/slots";
+import { getMetricsSummary } from "./metrics";
 import {
   listClinicAppointments,
   adminCreateAppointment,
@@ -213,6 +214,22 @@ apiRouter.get("/doctors", requireAuth, (req, res) => {
     slotMinutes: d.slotMinutes,
   }));
   res.json({ doctors });
+});
+
+// --- Agent response-time metrics (authenticated) ---
+
+// Powers the dashboard Insights page. Metrics are system-wide (not clinic-scoped):
+// "our average response time" is a property of the agent, and pre-clinic-selection
+// turns belong to no clinic. ?days filters the window; "all" / 0 means all-time.
+apiRouter.get("/metrics", requireAuth, (req, res) => {
+  const raw = req.query.days;
+  let days: number | null = 7;
+  if (raw === "all" || raw === "0") {
+    days = null;
+  } else if (typeof raw === "string" && Number.isInteger(Number(raw)) && Number(raw) > 0) {
+    days = Number(raw);
+  }
+  res.json(getMetricsSummary(days));
 });
 
 // --- Appointments (authenticated, clinic-scoped) ---

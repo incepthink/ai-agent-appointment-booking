@@ -11,6 +11,7 @@ import {
   getLastMessageAt,
   loadHistory,
 } from "./session";
+import type { TurnMetrics } from "./metrics";
 
 const client = new OpenAI({ apiKey: config.openai.apiKey });
 
@@ -136,7 +137,10 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
   ].join("\n");
 }
 
-export async function handleIncoming(phone: string, text: string): Promise<string> {
+export async function handleIncoming(
+  phone: string,
+  text: string,
+): Promise<{ reply: string; metrics: TurnMetrics }> {
   // Read last-seen time BEFORE appending the just-arrived message so it doesn't count.
   const lastSeen = getLastMessageAt(phone);
   const freshStart = !lastSeen || Date.now() - lastSeen.getTime() > STALE_AFTER_MS;
@@ -145,6 +149,20 @@ export async function handleIncoming(phone: string, text: string): Promise<strin
 
   const clinic = getActiveClinic(phone);
   console.log(`[agent] phone=${phone} active_clinic=${clinic ? `${clinic.name} [${clinic.code}]` : "none"} fresh_start=${freshStart}`);
+
+  // Accumulate per-turn latency/token metrics; the caller persists them with the
+  // end-to-end and WhatsApp-send timings it owns. done() tags every return path.
+  const metrics: TurnMetrics = {
+    clinicId: clinic?.id ?? null,
+    model: config.openai.model,
+    llmCalls: 0,
+    llmMs: 0,
+    toolCalls: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    cachedTokens: 0,
+  };
+  const done = (reply: string) => ({ reply, metrics });
 
   const history = loadHistory(phone);
   console.log(`[agent] history_msgs=${history.length}`);
@@ -158,6 +176,7 @@ export async function handleIncoming(phone: string, text: string): Promise<strin
   ];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const llmStart = Date.now();
     const completion = await client.chat.completions.create({
       model: config.openai.model,
       messages,
@@ -167,17 +186,25 @@ export async function handleIncoming(phone: string, text: string): Promise<strin
       // off the booking task.
       temperature: 0.4,
     });
+    metrics.llmCalls += 1;
+    metrics.llmMs += Date.now() - llmStart;
+    const usage = completion.usage;
+    metrics.promptTokens += usage?.prompt_tokens ?? 0;
+    metrics.completionTokens += usage?.completion_tokens ?? 0;
+    // prompt_tokens_details may be absent in older SDK types — read defensively.
+    metrics.cachedTokens += (usage as any)?.prompt_tokens_details?.cached_tokens ?? 0;
 
     const msg = completion.choices[0]?.message;
     if (!msg) {
       const fallback = "Sorry, I didn't catch that. Could you say it again?";
       appendAssistant(phone, fallback);
-      return fallback;
+      return done(fallback);
     }
 
     const toolCalls = msg.tool_calls;
 
     if (toolCalls && toolCalls.length > 0) {
+      metrics.toolCalls += toolCalls.length;
       appendAssistant(phone, msg.content ?? null, toolCalls);
       messages.push({
         role: "assistant",
@@ -205,10 +232,10 @@ export async function handleIncoming(phone: string, text: string): Promise<strin
     const reply = (msg.content ?? "").trim() ||
       "Sorry, I didn't quite get that. Could you rephrase?";
     appendAssistant(phone, reply);
-    return reply;
+    return done(reply);
   }
 
   const fallback = "Sorry, I'm having trouble completing that right now. Please try again in a moment.";
   appendAssistant(phone, fallback);
-  return fallback;
+  return done(fallback);
 }

@@ -77,6 +77,32 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS ix_conv_phone ON conversations(phone, id);
+
+  -- One row per handled inbound message: how long the reply took and why.
+  -- Used to track the agent's response time (the headline number patients feel)
+  -- and to break it down — LLM round-trips vs tool calls vs token bloat vs the
+  -- WhatsApp send — so we know which lever to pull. source distinguishes real
+  -- WhatsApp traffic from the local /chat test endpoint.
+  CREATE TABLE IF NOT EXISTS message_metrics (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone             TEXT,
+    clinic_id         INTEGER REFERENCES clinics(id),
+    source            TEXT NOT NULL DEFAULT 'whatsapp',
+    model             TEXT,
+    total_ms          INTEGER NOT NULL,
+    handle_ms         INTEGER NOT NULL,
+    send_ms           INTEGER,
+    llm_ms            INTEGER NOT NULL,
+    llm_calls         INTEGER NOT NULL,
+    tool_calls        INTEGER NOT NULL,
+    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    cached_tokens     INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS ix_metrics_created ON message_metrics(created_at);
+  CREATE INDEX IF NOT EXISTS ix_metrics_clinic ON message_metrics(clinic_id, created_at);
 `);
 
 // --- Seed the test clinics (idempotent, keyed on code) ---

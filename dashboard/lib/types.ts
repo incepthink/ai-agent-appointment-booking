@@ -53,6 +53,25 @@ export type SlotsResponse = {
   message?: string;
 };
 
+// --- Agent response-time metrics (Insights page) ---
+
+// A timing distribution for one measurement, all values in milliseconds.
+export type Stat = { avg: number; p50: number; p95: number; max: number };
+
+export type MetricsSummary = {
+  window_days: number | null; // null = all time
+  count: number;
+  total: Stat; // patient-perceived response time (headline)
+  handle: Stat; // agent processing
+  llm: Stat; // time inside OpenAI calls
+  send: Stat; // WhatsApp send
+  avg_llm_calls: number;
+  avg_tool_calls: number;
+  avg_prompt_tokens: number;
+  avg_completion_tokens: number;
+  avg_cached_tokens: number;
+};
+
 export const COMMON_TIMEZONES = [
   "Asia/Kolkata",
   "Asia/Dubai",

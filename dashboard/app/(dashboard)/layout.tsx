@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { CalendarDays, Settings, LogOut, Menu, X, CalendarHeart } from "lucide-react";
+import { CalendarDays, Gauge, Settings, LogOut, Menu, X, CalendarHeart } from "lucide-react";
 import { api, getToken, clearToken } from "@/lib/api";
 import type { Clinic, Doctor } from "@/lib/types";
 import { Spinner } from "@/components/ui";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/cn";
 
 const NAV = [
   { href: "/appointments", label: "Appointments", icon: CalendarDays },
+  { href: "/insights", label: "Insights", icon: Gauge },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

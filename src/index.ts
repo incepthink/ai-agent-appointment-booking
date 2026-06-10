@@ -5,6 +5,7 @@ import { handleIncoming } from "./agent";
 import { listActiveClinics } from "./clinics";
 import { extractIncoming, sendText, verifyWebhook } from "./whatsapp";
 import { apiRouter } from "./api";
+import { recordMessageMetric } from "./metrics";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -62,11 +63,23 @@ app.post("/webhook", async (req, res) => {
       `[webhook] processing message from ${incoming.from}: "${incoming.text}"`,
     );
 
-    const reply = await handleIncoming(incoming.from, incoming.text);
+    const t0 = Date.now();
+    const { reply, metrics } = await handleIncoming(incoming.from, incoming.text);
+    const handleMs = Date.now() - t0;
     console.log(`[webhook] agent reply: "${reply}"`);
 
+    const sendStart = Date.now();
     await sendText(incoming.from, reply);
+    const sendMs = Date.now() - sendStart;
     console.log(`[webhook] reply dispatched to ${incoming.from}`);
+
+    const totalMs = Date.now() - t0;
+    recordMessageMetric({ ...metrics, phone: incoming.from, source: "whatsapp", handleMs, sendMs, totalMs });
+    console.log(
+      `[metrics] total=${totalMs}ms handle=${handleMs}ms send=${sendMs}ms ` +
+        `llm_calls=${metrics.llmCalls} llm=${metrics.llmMs}ms tools=${metrics.toolCalls} ` +
+        `tokens(p/c/cached)=${metrics.promptTokens}/${metrics.completionTokens}/${metrics.cachedTokens}`,
+    );
   } catch (err) {
     console.error("[webhook] unhandled error:", err);
   }
@@ -82,7 +95,12 @@ app.post("/chat", async (req, res) => {
       .json({ error: "phone and text are required strings" });
   }
   try {
-    const reply = await handleIncoming(phone, text);
+    const t0 = Date.now();
+    const { reply, metrics } = await handleIncoming(phone, text);
+    const handleMs = Date.now() - t0;
+    // source='chat' so local test traffic is recorded but stays out of the
+    // dashboard's WhatsApp-only response-time numbers.
+    recordMessageMetric({ ...metrics, phone, source: "chat", handleMs, sendMs: null, totalMs: handleMs });
     res.json({ reply });
   } catch (err: any) {
     console.error("[chat] error:", err);

@@ -1,4 +1,4 @@
-import type { Appointment, Clinic, Doctor, SlotsResponse } from "./types";
+import type { Appointment, Clinic, Doctor, MetricsSummary, SlotsResponse } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 const TOKEN_KEY = "clinic_token";
@@ -117,6 +117,11 @@ export const api = {
 
   getSlots: (date: string, doctorId: number) =>
     request<SlotsResponse>(`/slots?date=${date}&doctor_id=${doctorId}`),
+
+  // Agent response-time metrics for the Insights page. days: number of days, or
+  // "all" for all-time.
+  getMetrics: (days: number | "all" = 7) =>
+    request<MetricsSummary>(`/metrics?days=${days}`),
 
   // SSE stream URL for live appointment updates. EventSource can't send an
   // Authorization header, so the token rides as a query param. Returns null

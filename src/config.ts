@@ -18,6 +18,7 @@ const schema = z.object({
 
   JWT_SECRET: z.string().min(1).default("dev-insecure-change-me"),
   ADMIN_API_KEY: z.string().min(1).default("dev-admin-key-change-me"),
+  // Comma-separated list of browser origins allowed to call the REST API (CORS).
   DASHBOARD_ORIGIN: z.string().default("http://localhost:3001"),
 
   CLINIC_NAME: z.string().default("The Clinic"),
@@ -53,7 +54,9 @@ export const config = {
   },
   jwtSecret: env.JWT_SECRET,
   adminApiKey: env.ADMIN_API_KEY,
-  dashboardOrigin: env.DASHBOARD_ORIGIN,
+  dashboardOrigins: env.DASHBOARD_ORIGIN.split(",")
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0),
   clinic: {
     name: env.CLINIC_NAME,
     tz: env.CLINIC_TZ,

@@ -10,7 +10,7 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 
 // Dashboard (separate Next.js app) calls the REST API cross-origin.
-app.use(cors({ origin: config.dashboardOrigin }));
+app.use(cors({ origin: config.dashboardOrigins }));
 app.use("/api", apiRouter);
 
 // Simple in-process dedupe for WhatsApp at-least-once delivery
@@ -51,12 +51,16 @@ app.post("/webhook", async (req, res) => {
     }
 
     if (seenMessageIds.has(incoming.messageId)) {
-      console.log(`[webhook] duplicate messageId ${incoming.messageId} — skipping`);
+      console.log(
+        `[webhook] duplicate messageId ${incoming.messageId} — skipping`,
+      );
       return;
     }
     rememberId(incoming.messageId);
 
-    console.log(`[webhook] processing message from ${incoming.from}: "${incoming.text}"`);
+    console.log(
+      `[webhook] processing message from ${incoming.from}: "${incoming.text}"`,
+    );
 
     const reply = await handleIncoming(incoming.from, incoming.text);
     console.log(`[webhook] agent reply: "${reply}"`);
@@ -73,7 +77,9 @@ app.post("/webhook", async (req, res) => {
 app.post("/chat", async (req, res) => {
   const { phone, text } = req.body ?? {};
   if (typeof phone !== "string" || typeof text !== "string") {
-    return res.status(400).json({ error: "phone and text are required strings" });
+    return res
+      .status(400)
+      .json({ error: "phone and text are required strings" });
   }
   try {
     const reply = await handleIncoming(phone, text);

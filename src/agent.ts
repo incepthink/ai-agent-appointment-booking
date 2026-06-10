@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { config } from "./config";
 import { dispatchTool, toolSpecs } from "./tools";
-import { getActiveClinic, type Clinic } from "./clinics";
+import { getActiveClinic, getClinicProfile, type Clinic, type ClinicProfile } from "./clinics";
 import { getActiveDoctor, listClinicDoctors } from "./doctors";
 import { nowInClinicTz } from "./tools/time";
 import {
@@ -20,6 +20,43 @@ const MAX_ITERATIONS = 6;
 // (re-welcome the patient and let them re-pick their clinic). Easy to tune.
 const STALE_AFTER_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+// Warm, consultative conversation strategy. This is what turns a curious patient
+// into a booked one without ever feeling pushy. Goal: be genuinely helpful and
+// reassuring, remove friction, and always leave the patient with one easy next
+// step. The ethical guardrails are NON-NEGOTIABLE (this is healthcare).
+const CONVERSATION_STRATEGY = [
+  `How to talk to patients:`,
+  `- Be warm and human. Acknowledge how the patient feels before getting practical (e.g. "That sounds uncomfortable — let's get you seen quickly."). Use their name once you know it.`,
+  `- Reduce friction: when it's relevant, proactively answer the things patients worry about (cost, insurance, location, parking, what to bring) using the clinic info above — don't make them ask.`,
+  `- If the patient hesitates, gently surface ONE genuine, relevant strength of the clinic or doctor that addresses THAT specific worry (e.g. cost → mention follow-ups are half price; nervous → mention the doctor explains things clearly). Never generic bragging.`,
+  `- Always end a booking-intent turn with one concrete, easy next step: offer 1-2 specific available slots ("I have 5:00 PM today or 11:00 AM tomorrow — want me to grab one?") rather than an open "when works for you?".`,
+  `- Handle reluctance by offering alternatives (a different time, or another suitable doctor), not pressure. If it's still a no, be gracious and leave the door open.`,
+  ``,
+  `Ethical guardrails (never break these):`,
+  `- You are a receptionist, not a clinician. Never give medical advice, diagnose, interpret symptoms, or judge how urgent something is. Steer medical questions to booking a doctor.`,
+  `- If a message sounds like an emergency (chest pain, trouble breathing, severe bleeding, etc.), tell the patient to contact emergency services or call the clinic directly right away — do not try to book a routine slot.`,
+  `- Never invent or exaggerate scarcity or urgency. Only state real availability from the tools.`,
+  `- Never make up facts about pricing, services, or insurance. If something isn't in the clinic info above, say you'll have the clinic confirm and share the contact number rather than guessing.`,
+].join("\n");
+
+// Builds the "about the clinic" block the agent uses to answer patient questions
+// and personalise the conversation. Returns "" when nothing is set so empty
+// fields add zero prompt noise. (Today this is a direct DB read; if the knowledge
+// base ever grows large this is the natural seam to swap in retrieval/RAG.)
+function clinicKnowledgeBlock(clinicId: number): string {
+  const profile: ClinicProfile | null = getClinicProfile(clinicId);
+  if (!profile) return "";
+  const lines: string[] = [];
+  if (profile.description) lines.push(profile.description);
+  if (profile.address) lines.push(`Address: ${profile.address}`);
+  if (profile.contactPhone) lines.push(`Contact: ${profile.contactPhone}`);
+  if (profile.knowledge) lines.push(profile.knowledge);
+  if (lines.length === 0) return "";
+  return [`About ${profile.name} (use this to answer questions and reassure patients):`, ...lines].join(
+    "\n",
+  );
+}
+
 function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean): string {
   const common = [
     `The patient's WhatsApp number is ${phone}. You already know it — never ask for it and never pass it to tools.`,
@@ -37,6 +74,8 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
       `When the patient names or picks a clinic, call select_clinic with its code before doing anything else.`,
       `Do not ask for booking details (name, date, time) until a clinic has been selected.`,
       ``,
+      `Be warm and welcoming from the first message — you want the patient to feel they're in good hands. Once they pick a clinic you'll have more details to help them with.`,
+      ``,
       ...common,
     ].join("\n");
   }
@@ -53,6 +92,8 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
         .join("\n")
     : "  (No doctors are configured at this clinic yet.)";
 
+  const knowledge = clinicKnowledgeBlock(clinic.id);
+
   return [
     `You are the receptionist for "${clinic.name}", which has several doctors. You chat with patients over WhatsApp.`,
     ``,
@@ -61,6 +102,7 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
     `Doctors at ${clinic.name}:`,
     roster,
     ``,
+    ...(knowledge ? [knowledge, ``] : []),
     activeDoctor
       ? `The patient is currently booking with ${activeDoctor.name} (${activeDoctor.specialty}).`
       : `No doctor has been chosen yet for this booking.`,
@@ -87,6 +129,8 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
     `- Before calling create_appointment, reschedule_appointment, or cancel_appointment, repeat the full details back (including the doctor) and get an explicit yes from the patient.`,
     `- If a requested slot is taken, offer 2-3 nearby alternatives for that doctor.`,
     `- For reschedule/cancel, first look up the patient's existing booking with find_appointments.`,
+    ``,
+    CONVERSATION_STRATEGY,
     ``,
     ...common,
   ].join("\n");
@@ -119,7 +163,9 @@ export async function handleIncoming(phone: string, text: string): Promise<strin
       messages,
       tools: toolSpecs,
       tool_choice: "auto",
-      temperature: 0.3,
+      // Slightly above neutral for warmer, more natural phrasing without drifting
+      // off the booking task.
+      temperature: 0.4,
     });
 
     const msg = completion.choices[0]?.message;

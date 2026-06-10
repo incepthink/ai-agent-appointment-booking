@@ -93,6 +93,7 @@ export type ClinicProfile = {
   address: string | null;
   contactPhone: string | null;
   description: string | null;
+  knowledge: string | null;
 };
 
 function toProfile(row: ClinicRow): ClinicProfile {
@@ -109,6 +110,7 @@ function toProfile(row: ClinicRow): ClinicProfile {
     address: row.address,
     contactPhone: row.contact_phone,
     description: row.description,
+    knowledge: row.knowledge,
   };
 }
 
@@ -148,14 +150,15 @@ export function createClinicAccount(input: {
   address?: string | null;
   contactPhone?: string | null;
   description?: string | null;
+  knowledge?: string | null;
 }): ClinicProfile {
   const code = uniqueCodeFromName(input.name);
   const result = db
     .prepare(
       `INSERT INTO clinics
          (code, name, tz, open, close, days, slot_minutes, active,
-          email, password_hash, address, contact_phone, description)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+          email, password_hash, address, contact_phone, description, knowledge)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       code,
@@ -170,6 +173,7 @@ export function createClinicAccount(input: {
       input.address ?? null,
       input.contactPhone ?? null,
       input.description ?? null,
+      input.knowledge ?? null,
     );
   return getClinicProfile(Number(result.lastInsertRowid))!;
 }
@@ -187,6 +191,7 @@ export function updateClinic(
     address: string | null;
     contactPhone: string | null;
     description: string | null;
+    knowledge: string | null;
   }>,
 ): ClinicProfile | null {
   const sets: string[] = [];
@@ -204,6 +209,7 @@ export function updateClinic(
   if (fields.address !== undefined) push("address", fields.address);
   if (fields.contactPhone !== undefined) push("contact_phone", fields.contactPhone);
   if (fields.description !== undefined) push("description", fields.description);
+  if (fields.knowledge !== undefined) push("knowledge", fields.knowledge);
 
   if (sets.length === 0) return getClinicProfile(id);
   vals.push(id);

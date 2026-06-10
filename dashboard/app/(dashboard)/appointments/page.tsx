@@ -1,93 +1,50 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Plus, Calendar, Phone, Clock, MoreHorizontal, CalendarX2, ArrowLeft, Stethoscope } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Appointment } from "@/lib/types";
-import { Button, Card, Badge, Spinner, Select } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { Modal } from "@/components/modal";
 import { BookingModal } from "@/components/booking-modal";
 import { AppointmentCalendar } from "@/components/appointment-calendar";
 import { useClinic } from "@/components/clinic-context";
 import { useToast } from "@/components/toast";
-import {
-  dayKey,
-  formatDayKey,
-  keyToMonth,
-  monthRangeIso,
-  todayKey,
-} from "@/lib/dates";
+import { dayKey, keyToMonth, todayKey } from "@/lib/dates";
+import { DoctorFilter, type DoctorScope } from "@/components/appointments/doctor-filter";
+import { DayPanel } from "@/components/appointments/day-panel";
+import { MonthList } from "@/components/appointments/month-list";
+import { useAppointments } from "@/components/appointments/use-appointments";
 
 export default function AppointmentsPage() {
   const { toast } = useToast();
-  const { clinic, doctors } = useClinic();
+  const { clinic, doctor } = useClinic();
   const tz = clinic.tz;
 
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [loading, setLoading] = useState(true);
-  // Unified clinic view: show every doctor by default, or filter to one.
-  const [doctorFilter, setDoctorFilter] = useState<number | "all">("all");
+  const {
+    appointments,
+    loading,
+    view,
+    selectedKey,
+    setSelectedKey,
+    reload,
+    changeMonth,
+    goToday,
+    selectDay,
+  } = useAppointments(tz);
 
-  // Visible month + the day whose appointments are shown below the calendar.
-  const initial = useMemo(() => keyToMonth(todayKey(tz)), [tz]);
-  const [view, setView] = useState<{ year: number; month: number }>(initial);
-  const [selectedKey, setSelectedKey] = useState<string | null>(() => todayKey(tz));
+  // "all" → every doctor; "mine" → just the logged-in account's doctor.
+  const [scope, setScope] = useState<DoctorScope>("all");
 
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingDate, setBookingDate] = useState<string | undefined>(undefined);
   const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const [menuFor, setMenuFor] = useState<number | null>(null);
 
-  // Fetch every appointment in the visible month (plus a little padding so the
-  // calendar's spill days are populated). All statuses — cancelled ones render
-  // muted, so there's no separate "cancelled" filter to maintain.
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { appointments } = await api.listAppointments(monthRangeIso(view.year, view.month));
-      setAppointments(appointments);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : "Failed to load appointments", "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [view.year, view.month, toast]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Live updates: refetch whenever the backend reports an appointment change
-  // (e.g. a slot booked from the WhatsApp chat), so it appears without a reload.
-  useEffect(() => {
-    const url = api.appointmentsStreamUrl();
-    if (!url) return;
-    const es = new EventSource(url);
-    es.addEventListener("appointments", () => load());
-    // On error EventSource auto-reconnects; nothing to do here.
-    return () => es.close();
-  }, [load]);
-
-  function changeMonth(delta: number) {
-    setView((v) => {
-      const m = v.month + delta;
-      return { year: v.year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 };
-    });
-  }
-
-  function goToday() {
-    const t = todayKey(tz);
-    setView(keyToMonth(t));
-    setSelectedKey(t);
-  }
-
-  // Selecting a cell focuses that day; a spill day also jumps to its month.
-  function selectDay(key: string) {
-    const { year, month } = keyToMonth(key);
-    if (year !== view.year || month !== view.month) setView({ year, month });
-    setSelectedKey(key);
+  function openBooking(date?: string) {
+    setBookingDate(date);
+    setBookingOpen(true);
   }
 
   async function confirmCancel() {
@@ -97,7 +54,7 @@ export default function AppointmentsPage() {
       await api.cancel(cancelTarget.id);
       toast("Appointment cancelled", "success");
       setCancelTarget(null);
-      load();
+      reload();
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "Cancel failed", "error");
     } finally {
@@ -105,19 +62,10 @@ export default function AppointmentsPage() {
     }
   }
 
-  function timeOf(label: string) {
-    return label.split(" at ")[1] ?? label;
-  }
-
-  function openBooking(date?: string) {
-    setBookingDate(date);
-    setBookingOpen(true);
-  }
-
-  // Apply the doctor filter (client-side over the loaded month).
+  // Apply the scope filter (client-side over the loaded month).
   const visible = useMemo(
-    () => (doctorFilter === "all" ? appointments : appointments.filter((a) => a.doctor_id === doctorFilter)),
-    [appointments, doctorFilter],
+    () => (scope === "all" ? appointments : appointments.filter((a) => a.doctor_id === doctor.id)),
+    [appointments, scope, doctor.id],
   );
 
   // Appointments for the selected day, sorted chronologically.
@@ -129,7 +77,7 @@ export default function AppointmentsPage() {
   }, [visible, selectedKey, tz]);
 
   // Whole-month appointments grouped by day (used when no day is selected).
-  const monthGroups = useMemo(() => {
+  const monthGroups = useMemo<[string, Appointment[]][]>(() => {
     const inMonth = visible
       .filter((a) => {
         const { year, month } = keyToMonth(dayKey(a.start_iso, tz));
@@ -147,91 +95,15 @@ export default function AppointmentsPage() {
 
   const canBookSelected = selectedKey ? selectedKey >= todayKey(tz) : false;
 
-  // A single appointment row, reused by both the day panel and the month list.
-  function Row({ a }: { a: Appointment }) {
-    return (
-      <div className="flex items-center gap-4 px-4 py-3.5">
-        <div className="flex w-20 shrink-0 items-center gap-1.5 text-sm font-semibold text-slate-900">
-          <Clock className="size-3.5 text-slate-400" />
-          {timeOf(a.label)}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-medium text-slate-900">{a.patient_name}</p>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-400">
-            <span className="inline-flex items-center gap-1">
-              <Phone className="size-3" /> {a.phone}
-            </span>
-            {a.doctor_name && (
-              <span className="inline-flex items-center gap-1 font-medium text-slate-500">
-                <Stethoscope className="size-3" /> {a.doctor_name}
-              </span>
-            )}
-            {a.reason && <span className="truncate">· {a.reason}</span>}
-          </div>
-        </div>
-        {a.status === "cancelled" ? (
-          <Badge tone="muted">Cancelled</Badge>
-        ) : (
-          <div className="relative">
-            <button
-              onClick={() => setMenuFor(menuFor === a.id ? null : a.id)}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              aria-label="Actions"
-            >
-              <MoreHorizontal className="size-5" />
-            </button>
-            {menuFor === a.id && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setMenuFor(null)} />
-                <div className="animate-fade-in absolute right-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                  <button
-                    onClick={() => {
-                      setRescheduleTarget(a);
-                      setMenuFor(null);
-                    }}
-                    className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    Reschedule
-                  </button>
-                  <button
-                    onClick={() => {
-                      setCancelTarget(a);
-                      setMenuFor(null);
-                    }}
-                    className="block w-full px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Appointments</h1>
           <p className="mt-0.5 text-sm text-slate-500">All bookings at {clinic.name}, across every doctor</p>
         </div>
-        <div className="flex items-center gap-2">
-          {doctors.length > 1 && (
-            <Select
-              aria-label="Filter by doctor"
-              className="w-44"
-              value={String(doctorFilter)}
-              onChange={(e) => setDoctorFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-            >
-              <option value="all">All doctors</option>
-              {doctors.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </Select>
-          )}
+        <div className="flex items-center gap-3">
+          <DoctorFilter value={scope} onChange={setScope} doctorName={doctor.name} />
           <Button onClick={() => openBooking(canBookSelected && selectedKey ? selectedKey : undefined)}>
             <Plus className="size-4" />
             New appointment
@@ -259,77 +131,26 @@ export default function AppointmentsPage() {
 
         {/* Appointments: selected day, or the whole month */}
         <div className="min-w-0">
-        {selectedKey ? (
-          <>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-                <Calendar className="size-4 text-slate-400" />
-                {formatDayKey(selectedKey)}
-                <span className="text-slate-400">
-                  · {dayAppointments.length} {dayAppointments.length === 1 ? "appointment" : "appointments"}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setSelectedKey(null)}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700"
-                >
-                  <ArrowLeft className="size-3.5" /> Whole month
-                </button>
-              </div>
-            </div>
-
-            {loading ? (
-              <LoadingRow />
-            ) : dayAppointments.length === 0 ? (
-              <EmptyState
-                message="No appointments this day"
-                hint={canBookSelected ? "The day is free — add one below." : "Nothing was booked on this day."}
-                action={
-                  canBookSelected ? (
-                    <Button variant="secondary" size="sm" onClick={() => openBooking(selectedKey)}>
-                      <Plus className="size-4" /> Add appointment
-                    </Button>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <Card className="divide-y divide-slate-100">
-                {dayAppointments.map((a) => (
-                  <Row key={a.id} a={a} />
-                ))}
-              </Card>
-            )}
-          </>
-        ) : loading ? (
-          <LoadingRow />
-        ) : monthGroups.length === 0 ? (
-          <EmptyState
-            message="No appointments this month"
-            hint="Pick a day above or add one manually."
-            action={
-              <Button variant="secondary" size="sm" onClick={() => openBooking()}>
-                <Plus className="size-4" /> Add one manually
-              </Button>
-            }
-          />
-        ) : (
-          <div className="space-y-6">
-            {monthGroups.map(([day, items]) => (
-              <div key={day}>
-                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-500">
-                  <Calendar className="size-4" />
-                  {day}
-                </div>
-                <Card className="divide-y divide-slate-100">
-                  {items.map((a) => (
-                    <Row key={a.id} a={a} />
-                  ))}
-                </Card>
-              </div>
-            ))}
-          </div>
-        )}
+          {selectedKey ? (
+            <DayPanel
+              selectedKey={selectedKey}
+              appointments={dayAppointments}
+              loading={loading}
+              canBook={canBookSelected}
+              onBack={() => setSelectedKey(null)}
+              onBook={openBooking}
+              onReschedule={setRescheduleTarget}
+              onCancel={setCancelTarget}
+            />
+          ) : (
+            <MonthList
+              groups={monthGroups}
+              loading={loading}
+              onBook={() => openBooking()}
+              onReschedule={setRescheduleTarget}
+              onCancel={setCancelTarget}
+            />
+          )}
         </div>
       </div>
 
@@ -338,7 +159,7 @@ export default function AppointmentsPage() {
         open={bookingOpen}
         initialDate={bookingDate}
         onClose={() => setBookingOpen(false)}
-        onDone={() => load()}
+        onDone={() => reload()}
       />
 
       {/* Reschedule */}
@@ -346,7 +167,7 @@ export default function AppointmentsPage() {
         open={Boolean(rescheduleTarget)}
         reschedule={rescheduleTarget}
         onClose={() => setRescheduleTarget(null)}
-        onDone={() => load()}
+        onDone={() => reload()}
       />
 
       {/* Cancel confirm */}
@@ -369,36 +190,5 @@ export default function AppointmentsPage() {
         </div>
       </Modal>
     </div>
-  );
-}
-
-function LoadingRow() {
-  return (
-    <div className="flex items-center gap-2 py-16 text-sm text-slate-400">
-      <Spinner className="size-5 text-brand" /> Loading…
-    </div>
-  );
-}
-
-function EmptyState({
-  message,
-  hint,
-  action,
-}: {
-  message: string;
-  hint: string;
-  action?: ReactNode;
-}) {
-  return (
-    <Card className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-      <div className="flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
-        <CalendarX2 className="size-6" />
-      </div>
-      <div>
-        <p className="font-medium text-slate-700">{message}</p>
-        <p className="text-sm text-slate-400">{hint}</p>
-      </div>
-      {action}
-    </Card>
   );
 }

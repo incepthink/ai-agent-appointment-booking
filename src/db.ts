@@ -192,11 +192,83 @@ addClinicCol("password_hash", "password_hash TEXT");
 addClinicCol("address", "address TEXT");
 addClinicCol("contact_phone", "contact_phone TEXT");
 addClinicCol("description", "description TEXT");
+// Free-form knowledge base the WhatsApp agent reads: services, pricing,
+// insurance, parking, "why choose us", first-visit info — whatever the owner
+// wants the agent to know when talking to patients.
+addClinicCol("knowledge", "knowledge TEXT");
 // Unique email for login lookups (partial: ignores seeded clinics with NULL email).
 db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS uq_clinic_email
     ON clinics(email) WHERE email IS NOT NULL;
 `);
+
+// --- Seed clinic profile + knowledge for the test clinics ---
+// The SEED_CLINICS insert above uses INSERT OR IGNORE and only sets scheduling
+// columns, so profile/knowledge stay NULL on a fresh row. Backfill them here so
+// dev DBs have realistic content for the agent to draw on. Guarded on
+// `knowledge IS NULL` so a clinic owner's later edits are never clobbered.
+const SEED_CLINIC_PROFILES: Record<
+  string,
+  { description: string; address: string; contact_phone: string; knowledge: string }
+> = {
+  SUNRISE: {
+    description:
+      "Sunrise Clinic is a neighbourhood family practice focused on quick, friendly general care.",
+    address: "12 MG Road, Bengaluru 560001",
+    contact_phone: "+91 80 4000 1234",
+    knowledge: [
+      "Services: general consultations, health checkups, common illnesses (fever, cough, infections), blood-pressure and diabetes follow-ups.",
+      "Consultation fee: ₹500 for a first visit, ₹300 for a follow-up within 30 days.",
+      "Insurance: we accept most major health insurers for cashless OPD; bring your insurance card.",
+      "Payments: cash, UPI, and all major cards accepted.",
+      "First visit: please arrive 10 minutes early and bring any past prescriptions or reports.",
+      "Parking: free two-wheeler and limited car parking on-site.",
+      "Why patients choose us: short wait times, same-day slots most days, and doctors who explain things in plain language.",
+    ].join("\n"),
+  },
+  HARBOR: {
+    description:
+      "Harbor Medical is a primary-care clinic serving the downtown waterfront community.",
+    address: "88 Harbor View Ave, New York, NY 10004",
+    contact_phone: "+1 212-555-0142",
+    knowledge: [
+      "Services: primary care, annual physicals, common illnesses, preventive screenings, and routine follow-ups.",
+      "Consultation fee: $120 for a new patient visit, $80 for an established-patient follow-up.",
+      "Insurance: in-network with most major US plans; please have your member ID ready.",
+      "Payments: cash, all major cards, HSA/FSA cards accepted.",
+      "First visit: arrive 15 minutes early to complete intake; bring a photo ID and insurance card.",
+      "Parking: paid garage next door; street parking is metered.",
+      "Why patients choose us: easy online scheduling, minimal wait times, and a small, consistent care team.",
+    ].join("\n"),
+  },
+  LOTUS: {
+    description:
+      "Lotus Multi-Speciality brings general medicine, dermatology, and pediatrics together under one roof.",
+    address: "5 Lotus Avenue, Indiranagar, Bengaluru 560038",
+    contact_phone: "+91 80 4555 7788",
+    knowledge: [
+      "Specialities: General Medicine (Dr. Anil Rao), Dermatology (Dr. Sana Mehta), and Pediatrics (Dr. Priya Iyer).",
+      "Consultation fees: ₹600 general medicine, ₹800 dermatology, ₹700 pediatrics; follow-ups within 14 days are half price.",
+      "Insurance: cashless OPD available with most major insurers; carry your insurance card and a photo ID.",
+      "Payments: cash, UPI, and all major cards accepted.",
+      "First visit: arrive 10 minutes early; for children, bring the vaccination record.",
+      "Parking: dedicated patient parking in the basement.",
+      "Why patients choose us: multiple specialists in one place, same-week dermatology and pediatric slots, and a calm, child-friendly waiting area.",
+    ].join("\n"),
+  },
+};
+
+const backfillClinicProfile = db.prepare(
+  `UPDATE clinics
+     SET description = @description,
+         address = @address,
+         contact_phone = @contact_phone,
+         knowledge = @knowledge
+   WHERE code = @code AND knowledge IS NULL`,
+);
+for (const [code, p] of Object.entries(SEED_CLINIC_PROFILES)) {
+  backfillClinicProfile.run({ code, ...p });
+}
 
 export type AppointmentRow = {
   id: number;
@@ -244,6 +316,7 @@ export type ClinicRow = {
   address: string | null;
   contact_phone: string | null;
   description: string | null;
+  knowledge: string | null;
 };
 
 export type SessionRow = {

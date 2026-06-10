@@ -13,6 +13,31 @@ import {
 
 export type ToolContext = { phone: string; clinic: Clinic };
 
+// The model occasionally fabricates a filler name (or passes a relationship
+// word) to satisfy the required patient_name parameter instead of asking the
+// sender. Prompt rules alone haven't stopped this, so reject those values here
+// and bounce an instruction back to the model.
+const PLACEHOLDER_NAMES = new Set([
+  // generic fillers the model reaches for
+  "patient", "the patient", "patient name", "unknown", "name", "no name",
+  "n a", "na", "tbd", "test", "user", "customer", "guest", "client", // "n a" = "N/A" after normalization
+  "anonymous", "someone", "me", "myself",
+  // relationship words (mirrors the prompt rule)
+  "grandmother", "grandma", "granny", "grandfather", "grandpa",
+  "mother", "mom", "mum", "father", "dad", "son", "daughter",
+  "wife", "husband", "brother", "sister", "uncle", "aunt", "aunty",
+  "cousin", "nephew", "niece", "friend",
+]);
+
+// Exact full-string match after normalization, so real names that merely
+// contain a blocked word ("Patience", "Sonia") are never rejected.
+function isPlaceholderName(name: string): boolean {
+  const norm = name.toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (PLACEHOLDER_NAMES.has(norm)) return true;
+  if (norm.startsWith("my ") && PLACEHOLDER_NAMES.has(norm.slice(3))) return true;
+  return false;
+}
+
 type BookedAppointment = {
   id: number;
   start_iso: string;
@@ -30,6 +55,12 @@ export function createAppointment(
 ): { ok: boolean; appointment?: BookedAppointment; error?: string; alternatives?: { start_iso: string; label: string }[] } {
   const name = args.patient_name?.trim();
   if (!name) return { ok: false, error: "patient_name is required." };
+  if (isPlaceholderName(name)) {
+    return {
+      ok: false,
+      error: `"${name}" is not the patient's real name. Ask the sender for the actual name of the person who will see the doctor, then call create_appointment again. Never book with a placeholder.`,
+    };
+  }
 
   const check = checkSlotAvailable(doctor, { start_iso: args.start_iso });
   if (!check.available) {

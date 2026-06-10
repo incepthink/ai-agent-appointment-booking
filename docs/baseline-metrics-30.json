@@ -1,0 +1,33 @@
+﻿{
+    "window_days":  30,
+    "count":  43,
+    "total":  {
+                  "avg":  2186,
+                  "p50":  1826,
+                  "p95":  4148,
+                  "max":  4812
+              },
+    "handle":  {
+                   "avg":  1562,
+                   "p50":  1197,
+                   "p95":  3415,
+                   "max":  4115
+               },
+    "llm":  {
+                "avg":  1550,
+                "p50":  1194,
+                "p95":  3383,
+                "max":  4078
+            },
+    "send":  {
+                 "avg":  625,
+                 "p50":  643,
+                 "p95":  831,
+                 "max":  1036
+             },
+    "avg_llm_calls":  1.4,
+    "avg_tool_calls":  0.4,
+    "avg_prompt_tokens":  4711.7,
+    "avg_completion_tokens":  46.9,
+    "avg_cached_tokens":  2369.5
+}

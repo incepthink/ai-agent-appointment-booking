@@ -45,6 +45,32 @@ export function loadHistory(phone: string): ChatMsg[] {
   return msgs;
 }
 
+// Concatenated text of the patient's own messages since their last SUCCESSFUL
+// booking — the "current booking window". Used to verify a patient_name the
+// model passes was actually given by the sender for THIS booking, not lifted
+// from an earlier appointment in the history. Each create_appointment result is
+// stored as a tool row (name = 'create_appointment'), so a success is findable
+// by its JSON content.
+export function userTextSinceLastBooking(phone: string): string {
+  const lastBooking = db
+    .prepare(
+      `SELECT id FROM conversations
+       WHERE phone = ? AND role = 'tool' AND name = 'create_appointment'
+         AND content LIKE '%"ok":true%'
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(phone) as { id: number } | undefined;
+  const sinceId = lastBooking?.id ?? 0;
+  const rows = db
+    .prepare(
+      `SELECT content FROM conversations
+       WHERE phone = ? AND role = 'user' AND id > ?
+       ORDER BY id ASC`,
+    )
+    .all(phone, sinceId) as { content: string | null }[];
+  return rows.map((r) => r.content ?? "").join("\n");
+}
+
 export function getLastMessageAt(phone: string): Date | null {
   const row = db
     .prepare(

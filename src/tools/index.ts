@@ -132,7 +132,7 @@ export const toolSpecs: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           patient_name: {
             type: "string",
             description:
-              'The actual name of the person who will be seen by the doctor — a real name the patient gave you, never a relationship word like "grandmother" or "my son", and never a placeholder such as "Patient" or "Unknown". If you don\'t have the real name yet, ask for it before calling this.',
+              'The actual name of the person who will be seen by the doctor — a real name the sender gave you for THIS booking, never one carried over from an earlier appointment in the conversation, never a relationship word like "grandmother" or "my son", and never a placeholder such as "Patient" or "Unknown". If you don\'t have the real name for this booking yet, ask for it before calling this.',
           },
           start_iso: { type: "string", description: "ISO 8601 start datetime." },
           reason: { type: "string" },

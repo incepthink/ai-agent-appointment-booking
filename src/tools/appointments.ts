@@ -2,6 +2,7 @@ import { db, type AppointmentRow } from "../db";
 import { getClinic, type Clinic } from "../clinics";
 import { getDoctor, type Doctor } from "../doctors";
 import { emitAppointmentsChanged } from "../events";
+import { userTextSinceLastBooking } from "../session";
 import { checkSlotAvailable } from "./slots";
 import {
   endOfSlot,
@@ -38,6 +39,18 @@ function isPlaceholderName(name: string): boolean {
   return false;
 }
 
+// A real name like "Zoe" passes isPlaceholderName, so it can't catch a name the
+// model carried over from an EARLIER booking instead of asking. Require at least
+// one substantial token of the name to appear in the sender's own messages for
+// THIS booking. Loose on purpose: a surname the model adds is fine; a wholesale
+// carried-over name (no token of which the sender typed this booking) is rejected.
+function nameIsGrounded(name: string, userText: string): boolean {
+  const haystack = userText.toLowerCase();
+  const tokens = (name.toLowerCase().match(/[a-z]+/g) ?? []).filter((t) => t.length >= 2);
+  if (tokens.length === 0) return false;
+  return tokens.some((t) => haystack.includes(t));
+}
+
 type BookedAppointment = {
   id: number;
   start_iso: string;
@@ -59,6 +72,12 @@ export function createAppointment(
     return {
       ok: false,
       error: `"${name}" is not the patient's real name. Ask the sender for the actual name of the person who will see the doctor, then call create_appointment again. Never book with a placeholder.`,
+    };
+  }
+  if (!nameIsGrounded(name, userTextSinceLastBooking(ctx.phone))) {
+    return {
+      ok: false,
+      error: `"${name}" was not provided by the sender for this booking — do not carry a name over from a previous appointment. Ask the sender for the patient's name for THIS appointment, then call create_appointment again.`,
     };
   }
 

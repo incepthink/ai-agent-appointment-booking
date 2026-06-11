@@ -44,18 +44,22 @@ export function listAvailableSlots(
   date: string;
   open: boolean;
   slots: { start_iso: string; label: string }[];
+  count: number;
+  first_label?: string;
+  last_label?: string;
   message?: string;
 } {
   const date = args.date;
   const dt = DateTime.fromISO(date, { zone: doctor.tz });
   if (!dt.isValid) {
-    return { date, open: false, slots: [], message: "Invalid date format. Use YYYY-MM-DD." };
+    return { date, open: false, slots: [], count: 0, message: "Invalid date format. Use YYYY-MM-DD." };
   }
   if (!isClinicOpenDay(dt, doctor)) {
     return {
       date,
       open: false,
       slots: [],
+      count: 0,
       message: `${doctor.name} is not available on ${dt.toFormat("cccc")}. Available days: ${doctor.days.join(", ")}.`,
     };
   }
@@ -70,6 +74,9 @@ export function listAvailableSlots(
     date,
     open: true,
     slots: available,
+    count: available.length,
+    first_label: available[0]?.label,
+    last_label: available[available.length - 1]?.label,
     message: available.length === 0 ? "No slots available for that day/part." : undefined,
   };
 }

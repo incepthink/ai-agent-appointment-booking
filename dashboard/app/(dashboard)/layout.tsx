@@ -103,7 +103,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <ClinicProvider initialClinic={clinic} initialDoctor={doctor} doctors={doctors}>
       <div className="flex min-h-screen">
         {/* Desktop sidebar */}
-        <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:block">
+        <aside className="hidden w-64 shrink-0 self-start sticky top-0 h-screen border-r border-slate-200 bg-white lg:block">
           {SidebarInner}
         </aside>
 

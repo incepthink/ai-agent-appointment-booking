@@ -46,7 +46,7 @@ export function DoctorFilter({
 
   return (
     <div className="inline-flex items-center gap-2">
-      <span className="text-xs font-medium text-slate-500">Showing</span>
+      {/* <span className="text-xs font-medium text-slate-500">Showing</span> */}
       <div
         role="tablist"
         aria-label="Filter appointments by doctor"

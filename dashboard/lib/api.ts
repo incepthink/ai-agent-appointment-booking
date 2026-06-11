@@ -1,4 +1,4 @@
-import type { Appointment, Clinic, Doctor, MetricsSummary, SlotsResponse } from "./types";
+import type { Appointment, Clinic, Day, Doctor, MetricsSummary, SlotsResponse } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 const TOKEN_KEY = "clinic_token";
@@ -89,6 +89,29 @@ export const api = {
 
   // All doctors at the clinic (roster) — powers the filter + booking picker.
   listDoctors: () => request<{ doctors: Doctor[] }>("/doctors"),
+
+  // Add a doctor to the clinic. The backend generates a password and returns it
+  // ONCE (the new doctor logs in and changes it).
+  addDoctor: (input: {
+    email: string;
+    name: string;
+    specialty: string;
+    bio?: string | null;
+    open?: string;
+    close?: string;
+    days?: Day[];
+    slotMinutes?: number;
+  }) =>
+    request<{ doctor: Doctor; email: string; password: string }>("/doctors", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  // Re-issue a doctor's password — returns the new password ONCE.
+  resetDoctorPassword: (id: number) =>
+    request<{ email: string | null; password: string }>(`/doctors/${id}/reset-password`, {
+      method: "POST",
+    }),
 
   listAppointments: (params: { from?: string; to?: string; status?: string; doctorId?: number } = {}) => {
     const q = new URLSearchParams();

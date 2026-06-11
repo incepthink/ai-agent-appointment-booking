@@ -25,6 +25,7 @@ import {
   listClinicDoctors,
   updateDoctor,
   setDoctorPassword,
+  createDoctorAccount,
 } from "./doctors";
 import { listAvailableSlots } from "./tools/slots";
 import { getMetricsSummary } from "./metrics";
@@ -47,6 +48,20 @@ const daysSchema = z
 // We onboard clinics ourselves: there is no self-signup. This endpoint is gated
 // by the admin key (x-admin-key header). The caller supplies the clinic details
 // + email; we generate a password and return it once so it can be handed over.
+// A doctor to create alongside the clinic. The agent-facing fields (name,
+// specialty, bio) are required so the agent can route patients; hours/days/slot
+// are optional and inherit the clinic's when omitted.
+const newDoctorSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1),
+  specialty: z.string().min(1),
+  bio: z.string().optional(),
+  open: hhmm.optional(),
+  close: hhmm.optional(),
+  days: daysSchema.optional(),
+  slotMinutes: z.coerce.number().int().positive().optional(),
+});
+
 const provisionSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
@@ -58,6 +73,9 @@ const provisionSchema = z.object({
   address: z.string().optional(),
   contactPhone: z.string().optional(),
   description: z.string().optional(),
+  // At least one doctor — auth is doctor-based, so a clinic with no doctor has
+  // no one who can log in.
+  doctors: z.array(newDoctorSchema).min(1, "Add at least one doctor"),
 });
 
 apiRouter.post("/admin/clinics", requireAdmin, async (req, res) => {
@@ -69,12 +87,21 @@ apiRouter.post("/admin/clinics", requireAdmin, async (req, res) => {
   if (getClinicByEmail(data.email)) {
     return res.status(409).json({ error: "A clinic with this email already exists." });
   }
-  const password = generatePassword();
-  const passwordHash = await hashPassword(password);
+  // Reject duplicate doctor emails — both within the batch and against existing rows.
+  const seen = new Set<string>();
+  for (const d of data.doctors) {
+    const key = d.email.trim().toLowerCase();
+    if (seen.has(key) || getDoctorRowByEmail(key)) {
+      return res.status(409).json({ error: `A doctor with email ${d.email} already exists.` });
+    }
+    seen.add(key);
+  }
+
+  const clinicPassword = generatePassword();
   const clinic = createClinicAccount({
     name: data.name,
     email: data.email,
-    passwordHash,
+    passwordHash: await hashPassword(clinicPassword),
     tz: data.tz,
     open: data.open,
     close: data.close,
@@ -84,8 +111,27 @@ apiRouter.post("/admin/clinics", requireAdmin, async (req, res) => {
     contactPhone: data.contactPhone ?? null,
     description: data.description ?? null,
   });
-  // Return the plaintext password ONCE — it is not stored or recoverable later.
-  res.status(201).json({ clinic, email: clinic.email, password });
+
+  const doctors: { id: number; name: string; email: string; password: string }[] = [];
+  for (const d of data.doctors) {
+    const password = generatePassword();
+    const doctor = createDoctorAccount({
+      clinicId: clinic.id,
+      clinicCode: clinic.code,
+      email: d.email,
+      passwordHash: await hashPassword(password),
+      name: d.name,
+      specialty: d.specialty,
+      bio: d.bio ?? null,
+      open: d.open ?? clinic.open,
+      close: d.close ?? clinic.close,
+      days: d.days ?? clinic.days,
+      slotMinutes: d.slotMinutes ?? clinic.slotMinutes,
+    });
+    doctors.push({ id: doctor.id, name: doctor.name, email: doctor.email!, password });
+  }
+  // Plaintext passwords are returned ONCE — they are not stored or recoverable later.
+  res.status(201).json({ clinic, doctors });
 });
 
 // --- Auth ---
@@ -202,18 +248,72 @@ apiRouter.put("/me", requireAuth, (req, res) => {
 // --- Clinic doctor roster (authenticated) — powers the dashboard filter + booking picker ---
 
 apiRouter.get("/doctors", requireAuth, (req, res) => {
-  const doctors = listClinicDoctors(req.clinicId!).map((d) => ({
-    id: d.id,
-    code: d.code,
-    name: d.name,
-    specialty: d.specialty,
-    bio: d.bio,
-    open: d.open,
-    close: d.close,
-    days: d.days,
-    slotMinutes: d.slotMinutes,
-  }));
+  const doctors = listClinicDoctors(req.clinicId!).map((d) => {
+    // email is not on Doctor; pull it from the profile so the Team page can show
+    // each doctor's login. getDoctorProfile is keyed by id (cheap, indexed).
+    const email = getDoctorProfile(d.id)?.email ?? null;
+    return {
+      id: d.id,
+      code: d.code,
+      name: d.name,
+      specialty: d.specialty,
+      bio: d.bio,
+      open: d.open,
+      close: d.close,
+      days: d.days,
+      slotMinutes: d.slotMinutes,
+      email,
+    };
+  });
   res.json({ doctors });
+});
+
+// --- Add a doctor to the caller's clinic (authenticated, clinic-scoped) ---
+// The system generates a password and returns it ONCE; the new doctor logs in
+// and changes it via /auth/change-password.
+const addDoctorSchema = newDoctorSchema;
+
+apiRouter.post("/doctors", requireAuth, async (req, res) => {
+  const parsed = addDoctorSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input." });
+  }
+  const data = parsed.data;
+  if (getDoctorRowByEmail(data.email)) {
+    return res.status(409).json({ error: "A doctor with this email already exists." });
+  }
+  const clinic = getClinicProfile(req.clinicId!);
+  if (!clinic) return res.status(404).json({ error: "Clinic not found." });
+
+  const password = generatePassword();
+  const doctor = createDoctorAccount({
+    clinicId: clinic.id,
+    clinicCode: clinic.code,
+    email: data.email,
+    passwordHash: await hashPassword(password),
+    name: data.name,
+    specialty: data.specialty,
+    bio: data.bio ?? null,
+    open: data.open ?? clinic.open,
+    close: data.close ?? clinic.close,
+    days: data.days ?? clinic.days,
+    slotMinutes: data.slotMinutes ?? clinic.slotMinutes,
+  });
+  res.status(201).json({ doctor, email: doctor.email, password });
+});
+
+// Re-issue a doctor's password (handover, or the doctor lost theirs). Returns the
+// new plaintext password ONCE. Scoped to the caller's clinic.
+apiRouter.post("/doctors/:id/reset-password", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid doctor id." });
+  const doctor = getDoctor(id);
+  if (!doctor || doctor.clinicId !== req.clinicId!) {
+    return res.status(404).json({ error: "Doctor not found at this clinic." });
+  }
+  const password = generatePassword();
+  setDoctorPassword(id, await hashPassword(password));
+  res.json({ email: getDoctorProfile(id)?.email ?? null, password });
 });
 
 // --- Agent response-time metrics (authenticated) ---

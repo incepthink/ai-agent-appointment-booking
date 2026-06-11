@@ -142,3 +142,58 @@ export function updateDoctor(
 export function setDoctorPassword(id: number, passwordHash: string): void {
   db.prepare(`UPDATE doctors SET password_hash = ? WHERE id = ?`).run(passwordHash, id);
 }
+
+// Derive a unique doctor code from the clinic code + doctor name
+// (e.g. clinic "LOTUS" + "Dr. Anil Rao" -> "LOTUS-RAO"), matching the seed
+// convention in db.ts. Doctor codes are globally UNIQUE, so we loop a numeric
+// suffix until free.
+function uniqueDoctorCode(clinicCode: string, name: string): string {
+  const words = name.replace(/[^a-zA-Z0-9 ]/g, "").trim().split(/\s+/);
+  const slug = (words[words.length - 1] || "DR").toUpperCase().slice(0, 8) || "DR";
+  const base = `${clinicCode.toUpperCase()}-${slug}`;
+  let code = base;
+  let n = 1;
+  while (db.prepare(`SELECT 1 FROM doctors WHERE code = ?`).get(code)) {
+    code = `${base}${n++}`;
+  }
+  return code;
+}
+
+// Create a new doctor account with login credentials at a clinic. Parallels
+// createClinicAccount in clinics.ts; the password is generated/hashed by the caller.
+export function createDoctorAccount(input: {
+  clinicId: number;
+  clinicCode: string;
+  email: string;
+  passwordHash: string;
+  name: string;
+  specialty: string;
+  bio?: string | null;
+  open: string;
+  close: string;
+  days: Day[];
+  slotMinutes: number;
+}): DoctorProfile {
+  const code = uniqueDoctorCode(input.clinicCode, input.name);
+  const result = db
+    .prepare(
+      `INSERT INTO doctors
+         (clinic_id, code, name, specialty, bio, open, close, days, slot_minutes,
+          email, password_hash, active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    )
+    .run(
+      input.clinicId,
+      code,
+      input.name.trim(),
+      input.specialty.trim(),
+      input.bio ?? null,
+      input.open,
+      input.close,
+      input.days.join(","),
+      input.slotMinutes,
+      input.email.trim().toLowerCase(),
+      input.passwordHash,
+    );
+  return getDoctorProfile(Number(result.lastInsertRowid))!;
+}

@@ -11,7 +11,14 @@ import { AppointmentCalendar } from "@/components/appointment-calendar";
 import { useClinic } from "@/components/clinic-context";
 import { useToast } from "@/components/toast";
 import { dayKey, keyToMonth, todayKey } from "@/lib/dates";
-import { DoctorFilter, type DoctorScope } from "@/components/appointments/doctor-filter";
+import {
+  DoctorFilter,
+  type DoctorScope,
+} from "@/components/appointments/doctor-filter";
+import {
+  ViewToggle,
+  type ViewMode,
+} from "@/components/appointments/view-toggle";
 import { DayPanel } from "@/components/appointments/day-panel";
 import { MonthList } from "@/components/appointments/month-list";
 import { useAppointments } from "@/components/appointments/use-appointments";
@@ -36,9 +43,19 @@ export default function AppointmentsPage() {
   // "all" → every doctor; "mine" → just the logged-in account's doctor.
   const [scope, setScope] = useState<DoctorScope>("all");
 
+  // A selected day means we're in "day" mode; no selection means whole-month.
+  // Selecting "Today" jumps to today; "Month" clears the selection.
+  const viewMode: ViewMode = selectedKey ? "day" : "month";
+  function changeViewMode(mode: ViewMode) {
+    if (mode === "month") setSelectedKey(null);
+    else goToday();
+  }
+
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingDate, setBookingDate] = useState<string | undefined>(undefined);
-  const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(
+    null,
+  );
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
@@ -64,7 +81,10 @@ export default function AppointmentsPage() {
 
   // Apply the scope filter (client-side over the loaded month).
   const visible = useMemo(
-    () => (scope === "all" ? appointments : appointments.filter((a) => a.doctor_id === doctor.id)),
+    () =>
+      scope === "all"
+        ? appointments
+        : appointments.filter((a) => a.doctor_id === doctor.id),
     [appointments, scope, doctor.id],
   );
 
@@ -99,12 +119,27 @@ export default function AppointmentsPage() {
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Appointments</h1>
-          <p className="mt-0.5 text-sm text-slate-500">All bookings at {clinic.name}, across every doctor</p>
+          <h1 className="text-2xl font-semibold text-slate-900">
+            Appointments
+          </h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            All bookings at {clinic.name}
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          <DoctorFilter value={scope} onChange={setScope} doctorName={doctor.name} />
-          <Button onClick={() => openBooking(canBookSelected && selectedKey ? selectedKey : undefined)}>
+          <ViewToggle value={viewMode} onChange={changeViewMode} />
+          <DoctorFilter
+            value={scope}
+            onChange={setScope}
+            doctorName={doctor.name}
+          />
+          <Button
+            onClick={() =>
+              openBooking(
+                canBookSelected && selectedKey ? selectedKey : undefined,
+              )
+            }
+          >
             <Plus className="size-4" />
             New appointment
           </Button>
@@ -137,7 +172,6 @@ export default function AppointmentsPage() {
               appointments={dayAppointments}
               loading={loading}
               canBook={canBookSelected}
-              onBack={() => setSelectedKey(null)}
               onBook={openBooking}
               onReschedule={setRescheduleTarget}
               onCancel={setCancelTarget}
@@ -175,7 +209,11 @@ export default function AppointmentsPage() {
         open={Boolean(cancelTarget)}
         onClose={() => setCancelTarget(null)}
         title="Cancel appointment?"
-        description={cancelTarget ? `${cancelTarget.patient_name} · ${cancelTarget.label}` : undefined}
+        description={
+          cancelTarget
+            ? `${cancelTarget.patient_name} · ${cancelTarget.label}`
+            : undefined
+        }
       >
         <p className="text-sm text-slate-600">
           This frees up the slot. The patient is not notified automatically.

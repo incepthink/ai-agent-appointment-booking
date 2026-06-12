@@ -3,7 +3,7 @@ import cors from "cors";
 import { config } from "./config";
 import { handleIncoming } from "./agent";
 import { listActiveClinics } from "./clinics";
-import { extractIncoming, sendText, sendTypingIndicator, verifyWebhook } from "./whatsapp";
+import { extractIncoming, sendText, sendTypingIndicator, splitReply, verifyWebhook } from "./whatsapp";
 import { apiRouter } from "./api";
 import { recordMessageMetric } from "./metrics";
 
@@ -72,10 +72,19 @@ app.post("/webhook", async (req, res) => {
     const handleMs = Date.now() - t0;
     console.log(`[webhook] agent reply: "${reply}"`);
 
+    // Deliver the body and any trailing question as separate, ordered bubbles.
+    // Awaiting each send before the next preserves order; the small pause
+    // between them is a safety margin and keeps the cadence natural.
+    const chunks = splitReply(reply);
     const sendStart = Date.now();
-    await sendText(incoming.from, reply);
+    for (let i = 0; i < chunks.length; i++) {
+      await sendText(incoming.from, chunks[i]);
+      if (i < chunks.length - 1 && config.whatsapp.interMessageDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, config.whatsapp.interMessageDelayMs));
+      }
+    }
     const sendMs = Date.now() - sendStart;
-    console.log(`[webhook] reply dispatched to ${incoming.from}`);
+    console.log(`[webhook] reply dispatched to ${incoming.from} in ${chunks.length} message(s)`);
 
     const totalMs = Date.now() - t0;
     recordMessageMetric({ ...metrics, phone: incoming.from, source: "whatsapp", handleMs, sendMs, totalMs });

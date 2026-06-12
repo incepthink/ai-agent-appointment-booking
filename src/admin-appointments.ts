@@ -3,6 +3,7 @@ import { getClinic, type Clinic } from "./clinics";
 import { getDoctor } from "./doctors";
 import { emitAppointmentsChanged } from "./events";
 import { checkSlotAvailable } from "./tools/slots";
+import { isPlaceholderName } from "./tools/appointments";
 import { endOfSlot, humanLocal, parseIsoToClinic, toUtcIso } from "./tools/time";
 
 // Dashboard-facing appointment shape (clinic-scoped, rendered in clinic tz). The
@@ -89,6 +90,13 @@ export function adminCreateAppointment(
 
   const name = args.patient_name?.trim();
   if (!name) return { ok: false, error: "patient_name is required." };
+  // Parity with the agent's booking path: reject placeholder/relationship words
+  // ("Patient", "Unknown", "grandmother", …) so the dashboard can't create the
+  // same junk records the agent is forbidden from creating. (Grounding doesn't
+  // apply here — there's no conversation to ground against.)
+  if (isPlaceholderName(name)) {
+    return { ok: false, error: `"${name}" is not a valid patient name. Enter the patient's real name.` };
+  }
   const phone = args.phone?.trim();
   if (!phone) return { ok: false, error: "phone is required." };
 

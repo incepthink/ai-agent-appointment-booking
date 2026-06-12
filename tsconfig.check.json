@@ -1,0 +1,9 @@
+{
+  "//": "Type-check-only config covering src + tests + evals. The base tsconfig.json drives the emit build (src only); this one is for `tsc --noEmit` in CI so test and eval code is type-checked too.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "tests/**/*", "evals/**/*", "vitest.config.ts"]
+}

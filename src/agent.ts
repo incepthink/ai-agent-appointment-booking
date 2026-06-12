@@ -20,7 +20,15 @@ import {
 } from "./session";
 import type { TurnMetrics } from "./metrics";
 
-const client = new OpenAI({ apiKey: config.openai.apiKey });
+const client = new OpenAI({
+  apiKey: config.openai.apiKey,
+  // Resilience: the SDK retries transient failures (429 rate limits, 5xx, and
+  // network errors) with exponential backoff, and aborts any single call that
+  // hangs past the timeout. Tuned so a brief upstream blip never becomes a
+  // dropped reply or a stalled webhook handler.
+  maxRetries: 3,
+  timeout: 30_000,
+});
 
 const MAX_ITERATIONS = 6;
 
@@ -231,14 +239,25 @@ export async function handleIncoming(
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const llmStart = Date.now();
-    const completion = await client.chat.completions.create({
-      model: config.openai.model,
-      messages,
-      tools: toolSpecs,
-      tool_choice: "auto",
-      // Low temperature for focused, consistent, no-frills receptionist replies.
-      temperature: 0.3,
-    });
+    let completion;
+    try {
+      completion = await client.chat.completions.create({
+        model: config.openai.model,
+        messages,
+        tools: toolSpecs,
+        tool_choice: "auto",
+        // Low temperature for focused, consistent, no-frills receptionist replies.
+        temperature: 0.3,
+      });
+    } catch (err) {
+      // Retries are exhausted (or the call timed out). Never let this bubble up
+      // and drop the patient's reply — degrade to a graceful, honest fallback.
+      console.error(`[agent] OpenAI call failed after retries:`, err);
+      const fallback =
+        "Sorry, I'm having trouble completing that right now. Please try again in a moment.";
+      appendAssistant(phone, fallback);
+      return done(fallback);
+    }
     metrics.llmCalls += 1;
     metrics.llmMs += Date.now() - llmStart;
     const usage = completion.usage;

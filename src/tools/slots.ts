@@ -15,6 +15,10 @@ import {
 
 type PartOfDay = "morning" | "afternoon" | "evening";
 
+// Upper bound on how far ahead a booking can be requested. Caps wasted slot
+// generation (and nonsense like "book me in the year 2099") at the boundary.
+const MAX_BOOKING_HORIZON_DAYS = 365;
+
 function filterByPart(slot: DateTime, doctor: Doctor, part?: PartOfDay): boolean {
   if (!part) return true;
   const h = slot.setZone(doctor.tz).hour;
@@ -54,6 +58,15 @@ export function listAvailableSlots(
   if (!dt.isValid) {
     return { date, open: false, slots: [], count: 0, message: "Invalid date format. Use YYYY-MM-DD." };
   }
+  if (dt.diff(nowInClinicTz(doctor), "days").days > MAX_BOOKING_HORIZON_DAYS) {
+    return {
+      date,
+      open: false,
+      slots: [],
+      count: 0,
+      message: `We can only book up to ${MAX_BOOKING_HORIZON_DAYS} days ahead. Please choose an earlier date.`,
+    };
+  }
   if (!isClinicOpenDay(dt, doctor)) {
     return {
       date,
@@ -92,6 +105,9 @@ export function checkSlotAvailable(
   const dt = parseIsoToClinic(args.start_iso, doctor);
   if (!dt.isValid) return { available: false, reason: "Invalid datetime." };
   if (dt <= nowInClinicTz(doctor)) return { available: false, reason: "That time is in the past." };
+  if (dt.diff(nowInClinicTz(doctor), "days").days > MAX_BOOKING_HORIZON_DAYS) {
+    return { available: false, reason: `That's beyond how far ahead we can book (${MAX_BOOKING_HORIZON_DAYS} days).` };
+  }
   if (!isWithinClinicHours(dt, doctor)) {
     const ymd = dt.toFormat("yyyy-LL-dd");
     const allSlots = slotsForDate(ymd, doctor);

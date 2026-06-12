@@ -32,7 +32,9 @@ const PLACEHOLDER_NAMES = new Set([
 
 // Exact full-string match after normalization, so real names that merely
 // contain a blocked word ("Patience", "Sonia") are never rejected.
-function isPlaceholderName(name: string): boolean {
+// Exported so other booking paths (e.g. the dashboard's admin booking) can
+// reject the same placeholders the agent does.
+export function isPlaceholderName(name: string): boolean {
   const norm = name.toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
   if (PLACEHOLDER_NAMES.has(norm)) return true;
   if (norm.startsWith("my ") && PLACEHOLDER_NAMES.has(norm.slice(3))) return true;
@@ -44,7 +46,7 @@ function isPlaceholderName(name: string): boolean {
 // one substantial token of the name to appear in the sender's own messages for
 // THIS booking. Loose on purpose: a surname the model adds is fine; a wholesale
 // carried-over name (no token of which the sender typed this booking) is rejected.
-function nameIsGrounded(name: string, userText: string): boolean {
+export function nameIsGrounded(name: string, userText: string): boolean {
   const haystack = userText.toLowerCase();
   const tokens = (name.toLowerCase().match(/[a-z]+/g) ?? []).filter((t) => t.length >= 2);
   if (tokens.length === 0) return false;
@@ -79,6 +81,16 @@ export function createAppointment(
       ok: false,
       error: `"${name}" was not provided by the sender for this booking — do not carry a name over from a previous appointment. Ask the sender for the patient's name for THIS appointment, then call create_appointment again.`,
     };
+  }
+
+  // Guard against a doctor deactivated between selection and booking: the active
+  // doctor is resolved at the start of the turn, but a long conversation (or an
+  // admin toggling the roster) could leave a stale, now-inactive doctor here.
+  const active = db.prepare(`SELECT active FROM doctors WHERE id = ?`).get(doctor.id) as
+    | { active: number }
+    | undefined;
+  if (!active || active.active !== 1) {
+    return { ok: false, error: "That doctor is no longer available for booking. Please choose another doctor." };
   }
 
   const check = checkSlotAvailable(doctor, { start_iso: args.start_iso });

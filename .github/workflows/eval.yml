@@ -1,0 +1,46 @@
+name: LLM Evals
+
+# Gated, token-costing: runs the golden scenarios against the REAL model and
+# grades them (assertions + LLM judge). Kept OFF the hot path so spend is
+# deliberate — trigger it by hand, or let the nightly run track drift.
+#
+# Requires repo secret OPENAI_API_KEY.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Runs per scenario (pass rate sample size)"
+        required: false
+        default: "3"
+      only:
+        description: "Comma-separated scenario ids (blank = all)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC nightly drift check
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Guard — require an API key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::OPENAI_API_KEY secret is not set — cannot run live evals."
+            exit 1
+          fi
+      - name: Run evals
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EVAL_RUNS: ${{ github.event.inputs.runs || '3' }}
+          EVAL_ONLY: ${{ github.event.inputs.only || '' }}
+        # Non-zero exit if any scenario is below 100% pass rate (see run.ts).
+        run: npm run eval

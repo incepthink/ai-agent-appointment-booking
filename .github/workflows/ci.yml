@@ -1,0 +1,23 @@
+name: CI
+
+# Fast, free, runs on every push/PR. The agent's LLM is mocked in these tests,
+# so NO OpenAI key is needed and nothing hits a paid API.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Type-check (src + tests + evals)
+        run: npm run typecheck:all
+      - name: Unit + integration + mocked-agent tests
+        run: npm test

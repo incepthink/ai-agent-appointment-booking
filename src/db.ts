@@ -3,10 +3,16 @@ import bcrypt from "bcryptjs";
 import fs from "node:fs";
 import path from "node:path";
 
-const dataDir = path.resolve(process.cwd(), "data");
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+// DB location is overridable via CLINIC_DB_PATH so tests (and alternate
+// deployments) can point at an isolated file or ":memory:". Defaults to the
+// app's data/clinic.db — production behaviour is unchanged when unset.
+const dbPath = process.env.CLINIC_DB_PATH || path.join(path.resolve(process.cwd(), "data"), "clinic.db");
+if (dbPath !== ":memory:") {
+  const dir = path.dirname(dbPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
 
-export const db = new Database(path.join(dataDir, "clinic.db"));
+export const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 

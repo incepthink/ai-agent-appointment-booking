@@ -12,6 +12,9 @@ const schema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: z.string().min(1),
   WHATSAPP_WABA_ID: z.string().min(1),
   WHATSAPP_API_VERSION: z.string().default("v21.0"),
+  // Pause between sequential reply bubbles (e.g. body, then trailing question)
+  // so they arrive in order. 0 disables the pause.
+  WHATSAPP_INTER_MESSAGE_DELAY_MS: z.coerce.number().int().min(0).default(600),
 
   OPENAI_API_KEY: z.string().min(1),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
@@ -47,6 +50,7 @@ export const config = {
     phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
     wabaId: env.WHATSAPP_WABA_ID,
     apiVersion: env.WHATSAPP_API_VERSION,
+    interMessageDelayMs: env.WHATSAPP_INTER_MESSAGE_DELAY_MS,
   },
   openai: {
     apiKey: env.OPENAI_API_KEY,

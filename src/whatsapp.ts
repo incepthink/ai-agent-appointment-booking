@@ -41,23 +41,52 @@ export function extractIncoming(payload: any): IncomingTextMessage | null {
   return { from, text: body, messageId: id };
 }
 
-// Splits a reply so its closing question lands as its own WhatsApp bubble. A
-// reply like "…our Gynecologist. Would you like to book an appointment with
-// her?" reads more naturally on WhatsApp as two messages: the body, then the
-// question. Returns 1 or 2 chunks — only the TRAILING question is peeled off.
+// Words that end in a "." but are NOT a sentence end — a boundary scan must skip
+// these or it splits "Dr. Meera" into two bubbles. Lower-cased, no trailing dot.
+const ABBREVIATIONS = new Set(["dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc"]);
+
+// Splits a reply into ordered WhatsApp bubbles so it reads naturally — and ONLY
+// when the break is clean. A bad split is worse than none, so anything we're not
+// sure about ships as a single bubble. Returns 1 or 2 chunks.
 //
-// We split at the LAST sentence terminator that is followed by whitespace, so
-// mid-sentence dots in decimals/times ("8.30 PM") and currency ("₹800.") never
-// create a false boundary. Replies that don't end in "?", or that are a single
-// question with no preceding body, are returned unchanged as one chunk.
+// Two break shapes, in priority order:
+//   1. A list (slot times, doctor options) reads best with its intro line kept
+//      whole above it, e.g. "…with Dr. Meera Joshi on Friday, June 12:" as one
+//      bubble, then the bullets AND any trailing question together below.
+//   2. Otherwise, a trailing question is peeled off its preceding sentence body
+//      ("…our Gynecologist. Would you like to book?" → body, then question).
+//
+// The sentence scan splits at the LAST terminator followed by whitespace, but
+// skips false boundaries — abbreviations ("Dr.", "Mr."), single-letter initials,
+// and mid-sentence dots in decimals/times ("8.30 PM") or currency ("₹800.").
 export function splitReply(text: string): string[] {
   const trimmed = text.trim();
+
+  // 1. List-aware split: break right before the first list item, keeping the
+  //    intro line(s) above as their own bubble. Only when there IS intro text
+  //    above the list (index > 0); a list with nothing above it stays one chunk.
+  const lines = trimmed.split("\n");
+  const firstListIdx = lines.findIndex((l) => /^\s*(?:[-*•]|\d+[.)])\s+/.test(l));
+  if (firstListIdx > 0) {
+    const head = lines.slice(0, firstListIdx).join("\n").trim();
+    const rest = lines.slice(firstListIdx).join("\n").trim();
+    if (head && rest) return [head, rest];
+    return [trimmed];
+  }
+
+  // 2. Trailing-question peel — only for replies that actually end in a question.
   if (!trimmed.endsWith("?")) return [trimmed];
 
-  // Find the last "<.|!|?><whitespace>" boundary — the start of the final sentence.
   const boundary = /[.!?]\s+/g;
   let lastEnd = -1;
   for (let m = boundary.exec(trimmed); m; m = boundary.exec(trimmed)) {
+    // A "." may be a false boundary: skip abbreviations and single initials so
+    // "Dr. Mehta" / "A. Kumar" don't get torn apart mid-name.
+    if (m[0][0] === ".") {
+      const before = trimmed.slice(0, m.index);
+      const word = before.match(/(\w+)$/)?.[1] ?? "";
+      if (word.length === 1 || ABBREVIATIONS.has(word.toLowerCase())) continue;
+    }
     lastEnd = m.index + m[0].length;
   }
   if (lastEnd <= 0) return [trimmed];

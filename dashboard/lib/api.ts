@@ -84,7 +84,7 @@ export const api = {
   // The logged-in doctor's own profile + working hours.
   getMe: () => request<{ doctor: Doctor }>("/me"),
 
-  updateMe: (fields: Partial<Pick<Doctor, "name" | "specialty" | "bio" | "open" | "close" | "days" | "slotMinutes">>) =>
+  updateMe: (fields: Partial<Pick<Doctor, "name" | "specialty" | "qualification" | "bio" | "open" | "close" | "days" | "slotMinutes">>) =>
     request<{ doctor: Doctor }>("/me", { method: "PUT", body: JSON.stringify(fields) }),
 
   // All doctors at the clinic (roster) — powers the filter + booking picker.
@@ -96,6 +96,7 @@ export const api = {
     email: string;
     name: string;
     specialty: string;
+    qualification: string;
     bio?: string | null;
     open?: string;
     close?: string;

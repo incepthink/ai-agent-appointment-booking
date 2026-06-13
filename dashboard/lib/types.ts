@@ -22,6 +22,7 @@ export type Doctor = {
   code: string;
   name: string;
   specialty: string;
+  qualification: string;
   bio: string | null;
   open: string;
   close: string;

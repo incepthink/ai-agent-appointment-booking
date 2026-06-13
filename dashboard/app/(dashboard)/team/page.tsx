@@ -23,6 +23,7 @@ export default function TeamPage() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [specialty, setSpecialty] = useState("");
+  const [qualification, setQualification] = useState("");
   const [bio, setBio] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -48,6 +49,7 @@ export default function TeamPage() {
     setEmail("");
     setName("");
     setSpecialty("");
+    setQualification("");
     setBio("");
     setCredentials(null);
     setAddOpen(true);
@@ -61,6 +63,7 @@ export default function TeamPage() {
         email: email.trim(),
         name: name.trim(),
         specialty: specialty.trim(),
+        qualification: qualification.trim(),
         bio: bio.trim() || null,
       });
       setCredentials({ email: res.email, password: res.password });
@@ -122,6 +125,7 @@ export default function TeamPage() {
                   {expanded && (
                     <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-2 border-t border-slate-100 bg-slate-50/60 px-5 py-4 text-sm">
                       <DetailRow label="Specialty" value={d.specialty} />
+                      <DetailRow label="Qualification" value={d.qualification || "—"} />
                       <DetailRow label="Email" value={d.email ?? "—"} />
                       <DetailRow label="Bio" value={d.bio ?? "—"} />
                       <DetailRow label="Hours" value={`${d.open}–${d.close}`} />
@@ -179,6 +183,14 @@ export default function TeamPage() {
                 />
               </Field>
             </div>
+            <Field label="Qualification" hint="Degrees / credentials — shown to patients for reassurance">
+              <Input
+                required
+                value={qualification}
+                onChange={(e) => setQualification(e.target.value)}
+                placeholder="MBBS, MD (Dermatology)"
+              />
+            </Field>
             <Field label="Bio" hint="What they treat — the agent uses this to route patients to them">
               <Textarea
                 rows={3}

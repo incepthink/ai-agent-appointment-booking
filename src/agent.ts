@@ -124,7 +124,7 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
     ? doctors
         .map(
           (d) =>
-            `  - ${d.name} [code ${d.code}] — ${d.specialty}. Hours ${d.open}-${d.close}, ${d.days.join(", ")}.${d.bio ? ` ${d.bio}` : ""}`,
+            `  - ${d.name} [code ${d.code}] — ${d.specialty}${d.qualification ? ` (${d.qualification})` : ""}. Hours ${d.open}-${d.close}, ${d.days.join(", ")}.${d.bio ? ` ${d.bio}` : ""}`,
         )
         .join("\n")
     : "  (No doctors are configured at this clinic yet.)";
@@ -143,6 +143,7 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
     `How to choose a doctor (do this BEFORE checking slots or booking):`,
     `- First find out the patient's REASON for visit if you don't already know it.`,
     `- Based on that reason, recommend the single most suitable doctor from the list above, with one short sentence on why (e.g. a skin problem → the dermatologist). Ask if that doctor works for them.`,
+    `- Specialty is the primary signal; use a doctor's qualification as a secondary tie-breaker when specialty alone is ambiguous. When you recommend a doctor, you MAY mention their qualification (e.g. "Dr. Mehta, MD Dermatology") for reassurance, but keep it to one short clause — don't recite full credentials unless the patient asks.`,
     `- If the patient agrees, call select_doctor with that doctor's code, then continue to date and time.`,
     `- If the patient declines or asks for other options, briefly list the other doctors (name + specialty) and let them pick; then call select_doctor for their choice.`,
     `- Each doctor has their OWN hours and calendar. Always use list_available_slots / check_slot_available for the SELECTED doctor — never quote one doctor's availability for another.`,
@@ -177,7 +178,7 @@ function systemPrompt(phone: string, clinic: Clinic | null, freshStart: boolean)
     (() => {
       const activeDoctor = getActiveDoctor(phone);
       return activeDoctor
-        ? `The patient is currently booking with ${activeDoctor.name} (${activeDoctor.specialty}).`
+        ? `The patient is currently booking with ${activeDoctor.name} (${activeDoctor.specialty}${activeDoctor.qualification ? `, ${activeDoctor.qualification}` : ""}).`
         : `No doctor has been chosen yet for this booking.`;
     })(),
     ...(freshStart

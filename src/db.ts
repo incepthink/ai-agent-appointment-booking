@@ -36,6 +36,7 @@ db.exec(`
     code          TEXT NOT NULL UNIQUE,
     name          TEXT NOT NULL,
     specialty     TEXT NOT NULL,
+    qualification TEXT NOT NULL DEFAULT '',
     bio           TEXT,
     open          TEXT NOT NULL,
     close         TEXT NOT NULL,
@@ -124,6 +125,17 @@ const seedClinic = db.prepare(
 );
 for (const c of SEED_CLINICS) seedClinic.run(c);
 
+// --- Migration: additive doctor columns ---
+// The doctors table may predate newer columns. ALTER them in (nullable / with a
+// default) BEFORE the doctor seed below, which references them. SQLite only
+// allows ADD COLUMN ... NOT NULL when a DEFAULT is supplied, so qualification
+// gets DEFAULT '' and existing rows backfill to empty. "Required" is enforced at
+// the API layer, not the DB.
+const doctorCols = db.prepare(`PRAGMA table_info(doctors)`).all() as { name: string }[];
+if (!doctorCols.some((c) => c.name === "qualification")) {
+  db.exec(`ALTER TABLE doctors ADD COLUMN qualification TEXT NOT NULL DEFAULT ''`);
+}
+
 // --- Seed doctors (idempotent, keyed on code) ---
 // Every doctor logs into the dashboard with their own email + password and keeps
 // their own working hours (timezone is inherited from their clinic). For local
@@ -136,19 +148,19 @@ const devDoctorHash = bcrypt.hashSync(DEV_DOCTOR_PASSWORD, 10);
 
 const SEED_DOCTORS = [
   // Legacy single-doctor clinics — mirror the clinic's own hours.
-  { clinic_code: "SUNRISE", code: "SUNRISE-GP", name: "Dr. Sunrise GP", specialty: "General Physician", bio: "General medicine, checkups and common illnesses.", open: "09:00", close: "18:00", days: "Mon,Tue,Wed,Thu,Fri,Sat", slot_minutes: 30, email: "gp@sunrise.test" },
-  { clinic_code: "HARBOR", code: "HARBOR-GP", name: "Dr. Harbor GP", specialty: "General Physician", bio: "General medicine, checkups and common illnesses.", open: "08:00", close: "16:00", days: "Mon,Tue,Wed,Thu,Fri", slot_minutes: 30, email: "gp@harbor.test" },
+  { clinic_code: "SUNRISE", code: "SUNRISE-GP", name: "Dr. Sunrise GP", specialty: "General Physician", qualification: "MBBS", bio: "General medicine, checkups and common illnesses.", open: "09:00", close: "18:00", days: "Mon,Tue,Wed,Thu,Fri,Sat", slot_minutes: 30, email: "gp@sunrise.test" },
+  { clinic_code: "HARBOR", code: "HARBOR-GP", name: "Dr. Harbor GP", specialty: "General Physician", qualification: "MBBS", bio: "General medicine, checkups and common illnesses.", open: "08:00", close: "16:00", days: "Mon,Tue,Wed,Thu,Fri", slot_minutes: 30, email: "gp@harbor.test" },
   // Multi-doctor test clinic.
-  { clinic_code: "LOTUS", code: "LOTUS-RAO", name: "Dr. Anil Rao", specialty: "General Physician", bio: "General medicine: fever, cough, infections, routine checkups, blood-pressure and diabetes follow-ups.", open: "09:00", close: "17:00", days: "Mon,Tue,Wed,Thu,Fri,Sat", slot_minutes: 30, email: "rao@lotus.test" },
-  { clinic_code: "LOTUS", code: "LOTUS-MEHTA", name: "Dr. Sana Mehta", specialty: "Dermatologist", bio: "Skin, hair and nails: rashes, acne, eczema, allergies, skin infections, hair loss.", open: "11:00", close: "19:00", days: "Tue,Wed,Thu,Fri,Sat", slot_minutes: 30, email: "mehta@lotus.test" },
-  { clinic_code: "LOTUS", code: "LOTUS-IYER", name: "Dr. Priya Iyer", specialty: "Pediatrician", bio: "Children's health: infant and child checkups, vaccinations, childhood fevers and illnesses.", open: "09:00", close: "13:00", days: "Mon,Tue,Wed,Thu,Fri", slot_minutes: 30, email: "iyer@lotus.test" },
+  { clinic_code: "LOTUS", code: "LOTUS-RAO", name: "Dr. Anil Rao", specialty: "General Physician", qualification: "MBBS, MD (General Medicine)", bio: "General medicine: fever, cough, infections, routine checkups, blood-pressure and diabetes follow-ups.", open: "09:00", close: "17:00", days: "Mon,Tue,Wed,Thu,Fri,Sat", slot_minutes: 30, email: "rao@lotus.test" },
+  { clinic_code: "LOTUS", code: "LOTUS-MEHTA", name: "Dr. Sana Mehta", specialty: "Dermatologist", qualification: "MBBS, MD (Dermatology)", bio: "Skin, hair and nails: rashes, acne, eczema, allergies, skin infections, hair loss.", open: "11:00", close: "19:00", days: "Tue,Wed,Thu,Fri,Sat", slot_minutes: 30, email: "mehta@lotus.test" },
+  { clinic_code: "LOTUS", code: "LOTUS-IYER", name: "Dr. Priya Iyer", specialty: "Pediatrician", qualification: "MBBS, DCH (Pediatrics)", bio: "Children's health: infant and child checkups, vaccinations, childhood fevers and illnesses.", open: "09:00", close: "13:00", days: "Mon,Tue,Wed,Thu,Fri", slot_minutes: 30, email: "iyer@lotus.test" },
 ] as const;
 
 const clinicIdByCode = db.prepare(`SELECT id FROM clinics WHERE code = ?`);
 const seedDoctor = db.prepare(
   `INSERT OR IGNORE INTO doctors
-     (clinic_id, code, name, specialty, bio, open, close, days, slot_minutes, email, password_hash)
-   VALUES (@clinic_id, @code, @name, @specialty, @bio, @open, @close, @days, @slot_minutes, @email, @password_hash)`,
+     (clinic_id, code, name, specialty, qualification, bio, open, close, days, slot_minutes, email, password_hash)
+   VALUES (@clinic_id, @code, @name, @specialty, @qualification, @bio, @open, @close, @days, @slot_minutes, @email, @password_hash)`,
 );
 for (const d of SEED_DOCTORS) {
   const clinicRow = clinicIdByCode.get(d.clinic_code) as { id: number } | undefined;
@@ -158,6 +170,7 @@ for (const d of SEED_DOCTORS) {
     code: d.code,
     name: d.name,
     specialty: d.specialty,
+    qualification: d.qualification,
     bio: d.bio,
     open: d.open,
     close: d.close,
@@ -321,6 +334,7 @@ export type DoctorRow = {
   code: string;
   name: string;
   specialty: string;
+  qualification: string;
   bio: string | null;
   open: string;
   close: string;

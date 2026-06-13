@@ -10,6 +10,7 @@ export type Doctor = {
   code: string;
   name: string;
   specialty: string;
+  qualification: string;
   bio: string | null;
   tz: string;
   open: string;
@@ -36,6 +37,7 @@ function toDoctor(row: DoctorJoinRow): Doctor {
     code: row.code,
     name: row.name,
     specialty: row.specialty,
+    qualification: row.qualification,
     bio: row.bio,
     tz: row.clinic_tz,
     open: row.open,
@@ -112,6 +114,7 @@ export function updateDoctor(
   fields: Partial<{
     name: string;
     specialty: string;
+    qualification: string;
     bio: string | null;
     open: string;
     close: string;
@@ -127,6 +130,7 @@ export function updateDoctor(
   };
   if (fields.name !== undefined) push("name", fields.name.trim());
   if (fields.specialty !== undefined) push("specialty", fields.specialty.trim());
+  if (fields.qualification !== undefined) push("qualification", fields.qualification.trim());
   if (fields.bio !== undefined) push("bio", fields.bio);
   if (fields.open !== undefined) push("open", fields.open);
   if (fields.close !== undefined) push("close", fields.close);
@@ -168,6 +172,7 @@ export function createDoctorAccount(input: {
   passwordHash: string;
   name: string;
   specialty: string;
+  qualification: string;
   bio?: string | null;
   open: string;
   close: string;
@@ -178,15 +183,16 @@ export function createDoctorAccount(input: {
   const result = db
     .prepare(
       `INSERT INTO doctors
-         (clinic_id, code, name, specialty, bio, open, close, days, slot_minutes,
+         (clinic_id, code, name, specialty, qualification, bio, open, close, days, slot_minutes,
           email, password_hash, active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
     )
     .run(
       input.clinicId,
       code,
       input.name.trim(),
       input.specialty.trim(),
+      input.qualification.trim(),
       input.bio ?? null,
       input.open,
       input.close,

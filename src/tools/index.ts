@@ -192,11 +192,12 @@ const NO_DOCTOR = {
   error: "No doctor selected. Use list_doctors to see the clinic's doctors, recommend one for the patient's reason, then select_doctor before checking slots or booking.",
 };
 
-function doctorSummary(d: { code: string; name: string; specialty: string; bio: string | null; open: string; close: string; days: string[] }) {
+function doctorSummary(d: { code: string; name: string; specialty: string; qualification: string; bio: string | null; open: string; close: string; days: string[] }) {
   return {
     code: d.code,
     name: d.name,
     specialty: d.specialty,
+    qualification: d.qualification,
     bio: d.bio,
     hours: `${d.open}-${d.close}`,
     days: d.days.join(", "),

@@ -23,6 +23,7 @@ export default function SettingsPage() {
   // My profile (doctor)
   const [docName, setDocName] = useState(doctor.name);
   const [specialty, setSpecialty] = useState(doctor.specialty);
+  const [qualification, setQualification] = useState(doctor.qualification);
   const [bio, setBio] = useState(doctor.bio ?? "");
   const [savingDoc, setSavingDoc] = useState(false);
 
@@ -69,6 +70,7 @@ export default function SettingsPage() {
       const { doctor: updated } = await api.updateMe({
         name: docName,
         specialty,
+        qualification,
         bio: bio || null,
       });
       setDoctor(updated);
@@ -194,6 +196,9 @@ export default function SettingsPage() {
               <Input value={specialty} onChange={(e) => setSpecialty(e.target.value)} placeholder="General Physician" />
             </Field>
           </div>
+          <Field label="Qualification" hint="Degrees / credentials — shown to patients for reassurance">
+            <Input value={qualification} onChange={(e) => setQualification(e.target.value)} placeholder="MBBS, MD (Dermatology)" />
+          </Field>
           <Field label="Bio" hint="What you treat — helps the agent recommend you for the right reasons">
             <Textarea rows={3} value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Skin, hair and nails: rashes, acne, eczema…" />
           </Field>

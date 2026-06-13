@@ -15,7 +15,10 @@
     "typecheck:all": "tsc -p tsconfig.check.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "eval": "tsx evals/run.ts"
+    "eval": "tsx evals/run.ts",
+    "demo:seed": "tsx scripts/demo-data.ts seed",
+    "demo:clean": "tsx scripts/demo-data.ts clean",
+    "demo:restore": "tsx scripts/demo-data.ts restore"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

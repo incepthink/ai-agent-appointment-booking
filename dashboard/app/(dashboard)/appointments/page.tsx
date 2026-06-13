@@ -117,23 +117,20 @@ export default function AppointmentsPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Appointments
-          </h1>
-          <p className="mt-0.5 text-sm text-slate-500">
-            All bookings at {clinic.name}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <ViewToggle value={viewMode} onChange={changeViewMode} />
-          <DoctorFilter
-            value={scope}
-            onChange={setScope}
-            doctorName={doctor.name}
-          />
+      <div className="mb-6 flex flex-col gap-4">
+        {/* Title + primary action */}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-900">
+              Appointments
+            </h1>
+            <p className="mt-0.5 text-sm text-slate-500">
+              All bookings at {clinic.name}
+            </p>
+          </div>
           <Button
+            size="sm"
+            className="shrink-0"
             onClick={() =>
               openBooking(
                 canBookSelected && selectedKey ? selectedKey : undefined,
@@ -141,8 +138,19 @@ export default function AppointmentsPage() {
             }
           >
             <Plus className="size-4" />
-            New appointment
+            <span className="sm:hidden">New</span>
+            <span className="hidden sm:inline">New appointment</span>
           </Button>
+        </div>
+
+        {/* View controls */}
+        <div className="flex flex-wrap items-center gap-2">
+          <ViewToggle value={viewMode} onChange={changeViewMode} />
+          <DoctorFilter
+            value={scope}
+            onChange={setScope}
+            doctorName={doctor.name}
+          />
         </div>
       </div>
 

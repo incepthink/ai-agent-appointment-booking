@@ -32,7 +32,7 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="animate-fade-in relative z-10 w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-xl">
+      <div className="animate-fade-in relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
         <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">{title}</h2>

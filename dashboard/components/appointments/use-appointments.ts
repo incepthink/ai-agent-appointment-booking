@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { Appointment } from "@/lib/types";
 import { keyToMonth, monthRangeIso, todayKey } from "@/lib/dates";
@@ -16,6 +16,10 @@ export function useAppointments(tz: string) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Ids seen on the last fetch — lets a silent (SSE) reload spot genuinely new
+  // bookings (ids that weren't here before) and announce them with a toast.
+  const knownIds = useRef<Set<number>>(new Set());
+
   // Visible month + the day whose appointments are shown below the calendar.
   const initial = useMemo(() => keyToMonth(todayKey(tz)), [tz]);
   const [view, setView] = useState<{ year: number; month: number }>(initial);
@@ -23,15 +27,31 @@ export function useAppointments(tz: string) {
 
   // Fetch every appointment in the visible month (plus padding so the calendar's
   // spill days are populated). All statuses — cancelled ones render muted.
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `silent` skips the loading state — used by live (SSE) refreshes so a newly
+  // booked appointment slots into the list in place without flashing the
+  // loading skeleton. Initial load and month changes pass nothing (loading on).
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const { appointments } = await api.listAppointments(monthRangeIso(view.year, view.month));
+      // On a live refresh, announce any genuinely new bookings. A reschedule or
+      // cancel keeps the same id, so only brand-new appointments show up here.
+      if (silent) {
+        const added = appointments.filter(
+          (a) => a.status === "booked" && !knownIds.current.has(a.id),
+        );
+        if (added.length === 1) {
+          toast(`New appointment: ${added[0].patient_name} · ${added[0].label}`, "success");
+        } else if (added.length > 1) {
+          toast(`${added.length} new appointments booked`, "success");
+        }
+      }
+      knownIds.current = new Set(appointments.map((a) => a.id));
       setAppointments(appointments);
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "Failed to load appointments", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [view.year, view.month, toast]);
 
@@ -45,7 +65,7 @@ export function useAppointments(tz: string) {
     const url = api.appointmentsStreamUrl();
     if (!url) return;
     const es = new EventSource(url);
-    es.addEventListener("appointments", () => load());
+    es.addEventListener("appointments", () => load(true));
     // On error EventSource auto-reconnects; nothing to do here.
     return () => es.close();
   }, [load]);

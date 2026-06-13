@@ -24,7 +24,7 @@ export function ViewToggle({
       title={title}
       onClick={() => onChange(mode)}
       className={cn(
-        "inline-flex h-8 items-center gap-1.5 rounded-md px-4 text-sm font-medium transition-colors",
+        "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors sm:px-4",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
         value === mode
           ? "bg-white text-slate-900 shadow-sm"
